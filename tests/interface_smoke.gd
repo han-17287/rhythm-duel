@@ -12,7 +12,7 @@ func run() -> void:
 	assert(game.interface.rooms.visible and not game.interface.home.visible)
 	game.receive({"type":"joined","slot":0,"code":"ABC123"})
 	game.interface.sync()
-	assert(game.interface.waiting.visible and game.interface.waiting_code.text=="ABC123")
+	assert(game.interface.waiting.visible and game.interface.waiting_code.text=="ABC123" and game.phase=="room")
 	game.receive({"type":"turn","turn":0,"attacker":0,"speed":1.0,"scores":[0,0]})
 	game.interface.sync()
 	assert(game.interface.budget.visible and not game.interface.waiting.visible)

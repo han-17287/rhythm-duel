@@ -2,6 +2,8 @@ import asyncio, importlib.util, json, unittest, tempfile
 import urllib.request, urllib.error
 from unittest.mock import patch
 from pathlib import Path
+import sys
+sys.path.insert(0,str(Path(__file__).parents[1]/"server"))
 from websockets.asyncio.client import connect
 from websockets.asyncio.server import serve
 spec=importlib.util.spec_from_file_location('relay',Path(__file__).parents[1]/'server/server.py')
@@ -48,7 +50,10 @@ class Network(unittest.IsolatedAsyncioTestCase):
                 async def send(w,**m): await w.send(json.dumps(m))
                 async def recv(w): return json.loads(await asyncio.wait_for(w.recv(),2))
                 await send(a,type='create'); joined=await recv(a); code=joined['code']
+                await recv(a) # room state
                 await send(b,type='join',code=code); self.assertEqual((await recv(b))['slot'],1)
+                await recv(a); await recv(b) # shared waiting room
+                await send(a,type='start')
                 for turn in range(6):
                     for w in (a,b): self.assertEqual((await recv(w))['turn'],turn)
                     attack,defend=(a,b) if turn%2==0 else (b,a)

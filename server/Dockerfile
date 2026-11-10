@@ -13,7 +13,7 @@ FROM python:3.12-slim-bookworm
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY server.py .
+COPY server.py accounts.py ./
 COPY --from=web-build /src/rhythm-duel-main/build/web ./static
 USER 65534:65534
 EXPOSE 8765
