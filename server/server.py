@@ -1,7 +1,31 @@
 """Two-player room relay. Deploy behind TLS for public use."""
-import asyncio, json, math, secrets, os, time
+import asyncio, json, math, secrets, os, time, mimetypes
+from pathlib import Path
+from urllib.parse import urlsplit, unquote
+from http import HTTPStatus
+from websockets.http11 import Response
+from websockets.datastructures import Headers
 from websockets.asyncio.server import serve
 rooms = {}
+
+STATIC_DIR = Path(os.getenv('STATIC_DIR', str(Path(__file__).parent/'static'))).resolve()
+
+def http_response(status, body, content_type='text/plain; charset=utf-8'):
+    return Response(status, HTTPStatus(status).phrase, Headers({
+        'Content-Type': content_type, 'Content-Length': str(len(body)),
+        'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff'
+    }), body)
+
+async def serve_game(connection, request):
+    if request.headers.get('Upgrade','').lower() == 'websocket': return None
+    path=unquote(urlsplit(request.path).path)
+    if path=='/health': return http_response(200,b'ok')
+    candidate=(STATIC_DIR/('index.html' if path=='/' else path.lstrip('/'))).resolve()
+    if not candidate.is_relative_to(STATIC_DIR) or not candidate.is_file():
+        return http_response(404,b'Not found')
+    body=await asyncio.to_thread(candidate.read_bytes)
+    mime='application/wasm' if candidate.suffix=='.wasm' else mimetypes.guess_type(candidate.name)[0] or 'application/octet-stream'
+    return http_response(200,body,mime)
 
 def validate(notes):
     if not isinstance(notes, list) or not 1 <= len(notes) <= 8: raise ValueError('노트 개수 오류')
@@ -86,6 +110,6 @@ async def cleanup():
                 await broadcast(r,type='error',message='제한 시간이 지나 방을 닫습니다')
                 for w in r['players']: await w.close()
 async def main():
-    async with serve(handle,'0.0.0.0',int(os.getenv('PORT','8765')),max_size=16384,ping_interval=20):
+    async with serve(handle,'0.0.0.0',int(os.getenv('PORT','8765')),max_size=16384,ping_interval=20,process_request=serve_game):
         await cleanup()
 if __name__=='__main__': asyncio.run(main())

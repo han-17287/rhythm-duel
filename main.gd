@@ -46,6 +46,14 @@ func label_at(text_value: String, pos: Vector2, font_size: int, color := Color.W
 	return l
 
 func _ready() -> void:
+	if ResourceLoader.exists("res://assets/NotoSansKR.ttf"):
+		var korean_theme := Theme.new()
+		var korean_font := FontVariation.new()
+		korean_font.base_font = load("res://assets/NotoSansKR.ttf")
+		korean_font.variation_opentype = {"wght":450.0}
+		korean_font.variation_embolden = 0.7
+		korean_theme.default_font = korean_font
+		theme = korean_theme
 	interface = preload("res://interface.gd").new(self)
 	interface.build()
 	audio = AudioStreamPlayer.new()

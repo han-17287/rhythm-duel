@@ -63,10 +63,14 @@ godot --headless --path . --script res://tests/smoke.gd
 
 공격 중 SPACE를 누르는 즉시 오른쪽에 노트가 나타나며 지난 입력은 왼쪽으로 흘러갑니다. 누르는 동안 노트 막대가 늘어나고 사용 예정 예산과 유지 시간을 즉시 표시합니다. 키를 떼면 길이가 확정됩니다. 완성된 패턴은 기존처럼 예산 8개를 모두 채운 후 상대에게 전송합니다.
 
-브라우저 배포는 [DEPLOY.md](DEPLOY.md)를 참고하세요. Render용 `render.yaml`과 고돗 Web용 `export_presets.cfg`를 포함했습니다. Render 서버는 사용자가 배포했으며 브라우저 게임의 Web 내보내기와 공개 배포는 아직 남아 있습니다.
+브라우저 배포는 [DEPLOY.md](DEPLOY.md)를 참고하세요. Render용 `render.yaml`과 고돗 Web용 `export_presets.cfg`를 포함했습니다. Render 서버는 사용자가 배포했으며 이제 Docker 배포가 Web 게임을 함께 빌드합니다. 새 배포 완료 후 같은 Render 주소를 게임 링크로 공유할 수 있습니다.
 
 ## 네온 아케이드 화면
 
 메인 메뉴에서 온라인 대전 또는 혼자 연습을 선택합니다. 온라인 화면은 방 만들기와 코드 참가를 나누고, 서버 주소는 서버 설정 안에 넣었습니다. 기본 서버는 `wss://rhythm-duel.onrender.com`이며 방 코드 복사, 공격·수비 안내, 실시간 리듬 표시를 지원합니다. 무료 서버의 시작 지연을 고려해 연결 대기는 90초입니다.
 
 화면 전환 검증: `godot --headless --path . --script res://tests/interface_smoke.gd`.
+
+## 고돗 없이 플레이
+
+배포가 완료되면 https://rhythm-duel.onrender.com 을 열어 온라인 대전을 선택하세요. 방장이 방 코드를 친구에게 공유하면 됩니다. 기존 Render 서비스에서 최신 커밋을 배포해야 이 기능이 적용됩니다. 자세한 내용은 [DEPLOY.md](DEPLOY.md)를 참고하세요.

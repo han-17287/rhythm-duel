@@ -1,4 +1,6 @@
-import asyncio, importlib.util, json, unittest
+import asyncio, importlib.util, json, unittest, tempfile
+import urllib.request, urllib.error
+from unittest.mock import patch
 from pathlib import Path
 from websockets.asyncio.client import connect
 from websockets.asyncio.server import serve
@@ -20,6 +22,25 @@ class Rules(unittest.TestCase):
         for notes in [[],NOTES[:7],[{'t':0,'d':float('nan')}],[{'t':0,'d':9}], [{'t':0,'d':4},{'t':1,'d':4}]]:
             with self.assertRaises(ValueError): s.validate(notes)
 class Network(unittest.IsolatedAsyncioTestCase):
+    async def test_http_and_websocket_same_port(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(s,'STATIC_DIR',Path(folder)):
+            Path(folder,'index.html').write_text('<title>PERFECTO</title>')
+            Path(folder,'index.wasm').write_bytes(b'\x00asm')
+            async with serve(s.handle,'127.0.0.1',0,process_request=s.serve_game) as server:
+                port=server.sockets[0].getsockname()[1]
+                def fetch(path):
+                    with urllib.request.urlopen(f'http://127.0.0.1:{port}{path}') as r:
+                        return r.status,r.headers['Content-Type'],r.read()
+                status,mime,body=await asyncio.to_thread(fetch,'/')
+                self.assertEqual(status,200); self.assertIn(b'PERFECTO',body)
+                self.assertEqual((await asyncio.to_thread(fetch,'/index.wasm'))[1],'application/wasm')
+                self.assertEqual((await asyncio.to_thread(fetch,'/health'))[2],b'ok')
+                with self.assertRaises(urllib.error.HTTPError) as err:
+                    await asyncio.to_thread(fetch,'/%2e%2e/server.py')
+                self.assertEqual(err.exception.code,404)
+                async with connect(f'ws://127.0.0.1:{port}') as ws:
+                    await ws.send(json.dumps({'type':'create'}))
+                    self.assertEqual(json.loads(await ws.recv())['type'],'joined')
     async def test_full_match(self):
         async with serve(s.handle,'127.0.0.1',0) as server:
             port=server.sockets[0].getsockname()[1]

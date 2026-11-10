@@ -2,3 +2,6 @@
 __pycache__/
 .venv/
 build/
+.web-build-cache/
+assets/NotoSansKR.ttf
+assets/NotoSansKR.ttf.import

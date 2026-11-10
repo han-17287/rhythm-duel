@@ -131,6 +131,8 @@ func build() -> void:
 	settings.add_theme_font_size_override("font_size",16)
 	g.endpoint = edit(rooms,"wss://서버주소",Rect2(216,553,690,54))
 	g.endpoint.text = str(ProjectSettings.get_setting("application/config/server_url","wss://rhythm-duel.onrender.com"))
+	if OS.has_feature("web"):
+		g.endpoint.text = str(JavaScriptBridge.eval("window.location.origin")).replace("https://","wss://").replace("http://","ws://")
 	g.endpoint.add_theme_font_size_override("font_size",17)
 	g.endpoint.hide()
 	# Compatibility holder; screen visibility is managed by sync().
