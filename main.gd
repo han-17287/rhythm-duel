@@ -31,6 +31,7 @@ var next_button: Button
 var practice_button: Button
 var flash := 0.0
 var audio: AudioStreamPlayer
+var interface: RefCounted
 
 func now() -> float:
 	return Time.get_ticks_usec() / 1000000.0
@@ -45,54 +46,8 @@ func label_at(text_value: String, pos: Vector2, font_size: int, color := Color.W
 	return l
 
 func _ready() -> void:
-	title = label_at("PERFECTO / RHYTHM DUEL", Vector2(48, 28), 30, CYAN)
-	label_at("01  CREATE A RHYTHM     /     02  ECHO IT     /     03  WIN", Vector2(50, 76), 15, Color("8395b8"))
-	status = label_at("방을 만들거나 코드로 참가하세요", Vector2(50, 185), 24)
-	tally = label_at("P1  00000     :     00000  P2", Vector2(730, 36), 20, GOLD)
-	result = label_at("MAKE YOUR MOVE", Vector2(50, 275), 40, GOLD)
-	hint = label_at("SPACE · 짧게 누르면 노트 / 길게 누르면 롱 노트", Vector2(50, 605), 20)
-	label_at("노트 예산 8  ·  롱 노트 1초당 1  ·  공수 교대  ·  총 3라운드", Vector2(50, 650), 16, Color("8395b8"))
-	lobby = HBoxContainer.new()
-	lobby.position = Vector2(50, 120)
-	lobby.add_theme_constant_override("separation", 10)
-	add_child(lobby)
-	endpoint = LineEdit.new()
-	endpoint.text = str(ProjectSettings.get_setting("application/config/server_url", "ws://127.0.0.1:8765"))
-	endpoint.custom_minimum_size.x = 285
-	lobby.add_child(endpoint)
-	var create := Button.new()
-	create.text = "방 만들기"
-	create.pressed.connect(func(): connect_room("create"))
-	lobby.add_child(create)
-	code = LineEdit.new()
-	code.placeholder_text = "방 코드"
-	code.max_length = 6
-	code.custom_minimum_size.x = 130
-	lobby.add_child(code)
-	var join := Button.new()
-	join.text = "참가"
-	join.pressed.connect(func(): connect_room("join"))
-	lobby.add_child(join)
-	practice_button = Button.new()
-	practice_button.text = "혼자 연습"
-	practice_button.pressed.connect(start_practice)
-	lobby.add_child(practice_button)
-	next_button = Button.new()
-	next_button.position = Vector2(50, 545)
-	next_button.text = "다음 공수 →"
-	next_button.visible = false
-	next_button.pressed.connect(func():
-		if practice: start_practice()
-		else: send_packet({"type":"next"})
-		next_button.hide())
-	add_child(next_button)
-	var back := Button.new()
-	back.text = "처음으로"
-	back.position = Vector2(970, 650)
-	back.pressed.connect(func():
-		socket.close()
-		get_tree().reload_current_scene())
-	add_child(back)
+	interface = preload("res://interface.gd").new(self)
+	interface.build()
 	audio = AudioStreamPlayer.new()
 	var wav := AudioStreamWAV.new()
 	wav.format = AudioStreamWAV.FORMAT_16_BITS
@@ -148,6 +103,7 @@ func receive(m: Dictionary) -> void:
 	match m.get("type", ""):
 		"joined":
 			slot = int(m.slot)
+			interface.room_code = str(m.code)
 			phase = "waiting"
 			status.text = "방 코드: %s  /  나: P%d  /  상대 기다리는 중" % [m.code, slot+1]
 		"turn":
@@ -276,7 +232,7 @@ func _process(delta: float) -> void:
 		while socket.get_available_packet_count()>0:
 			var packet = JSON.parse_string(socket.get_packet().get_string_from_utf8())
 			if packet is Dictionary: receive(packet)
-	elif phase == "connecting" and (state==WebSocketPeer.STATE_CLOSED or now()-origin>10):
+	elif phase == "connecting" and (state==WebSocketPeer.STATE_CLOSED or now()-origin>90):
 		socket.close()
 		phase = "lobby"
 		status.text = "연결 실패 · 중계 서버 실행과 주소를 확인하세요"
@@ -310,10 +266,18 @@ func _process(delta: float) -> void:
 				result.text = "연습 완료!"
 				next_button.show()
 			else: send_packet({"type":"result","hits":hits})
+	interface.sync()
 	flash = maxf(0,flash-delta*4)
 	queue_redraw()
 
 func _draw() -> void:
+	for gx in range(0,1152,48):
+		draw_line(Vector2(gx,0),Vector2(gx,720),Color(0.15,0.2,0.32,0.15),1)
+	for gy in range(0,720,48):
+		draw_line(Vector2(0,gy),Vector2(1152,gy),Color(0.15,0.2,0.32,0.15),1)
+	draw_arc(Vector2(1100,80),210,0,TAU,80,Color(0.64,0.54,1,0.1),60)
+	draw_line(Vector2(48,84),Vector2(1104,84),Color("29334d"),1)
+	if not phase in ["record","play"]: return
 	var y := 460.0
 	var left := 180.0
 	draw_style_box(panel_style(), Rect2(48,355,1056,165))

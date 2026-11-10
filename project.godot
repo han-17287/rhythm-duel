@@ -1,6 +1,6 @@
 config_version=5
 [application]
-config/server_url="ws://127.0.0.1:8765"
+config/server_url="wss://rhythm-duel.onrender.com"
 config/name="PERFECTO • Rhythm Duel"
 run/main_scene="res://main.tscn"
 [display]
