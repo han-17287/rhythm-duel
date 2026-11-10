@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: rhythm-duel-relay
+    runtime: docker
+    plan: free
+    rootDir: server
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    autoDeployTrigger: commit

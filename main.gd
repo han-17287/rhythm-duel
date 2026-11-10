@@ -57,7 +57,7 @@ func _ready() -> void:
 	lobby.add_theme_constant_override("separation", 10)
 	add_child(lobby)
 	endpoint = LineEdit.new()
-	endpoint.text = "ws://127.0.0.1:8765"
+	endpoint.text = str(ProjectSettings.get_setting("application/config/server_url", "ws://127.0.0.1:8765"))
 	endpoint.custom_minimum_size.x = 285
 	lobby.add_child(endpoint)
 	var create := Button.new()
@@ -206,6 +206,8 @@ func _input(event: InputEvent) -> void:
 				return
 			if origin < 0: origin = now()
 			down = now()-origin
+			flash = 1.0
+			queue_redraw()
 			audio.play()
 		elif not event.pressed and down >= 0:
 			finish_record_note()
@@ -284,6 +286,9 @@ func _process(delta: float) -> void:
 		phase = "disconnected"
 		status.text = "연결이 종료되었습니다 · 처음으로 버튼으로 재접속"
 	if phase == "record" and origin>=0 and slot==attacker:
+		if down>=0:
+			var elapsed := minf(now()-origin-down, 8-used)
+			result.text = "%d / 8  ·  HOLD %.1fs" % [used+maxi(1,ceili(elapsed)),elapsed]
 		if down>=0 and now()-origin-down >= 8-used: finish_record_note()
 		elif now()-origin>30:
 			phase = "timeout"
@@ -328,9 +333,25 @@ func _draw() -> void:
 				draw_circle(Vector2(clampf(tail,65,1090),y),8,CYAN)
 			if x>=65: draw_circle(Vector2(x,y),13,GOLD if float(n.d)>0 else CYAN)
 	elif phase=="record":
+		var current := maxf(0,now()-origin) if origin>=0 else 0.0
+		var pending_units := maxi(1,ceili(minf(current-down,8-used))) if down>=0 else 0
 		for i in range(8):
-			draw_circle(Vector2(280+i*90,y),15,CYAN if i<used else Color("283751"))
-		if down>=0: draw_arc(Vector2(left,y),28,0,TAU*minf((now()-origin-down)/maxf(1,8-used),1),40,GOLD,5)
+			draw_circle(Vector2(280+i*90,390),8,CYAN if i<used else (GOLD if i<used+pending_units else Color("283751")))
+		for n in notes:
+			draw_record_note(float(n.t),float(n.d),current,false)
+		if down>=0:
+			draw_record_note(down,minf(current-down,8-used),current,true)
+			draw_circle(Vector2(1050,y),19+flash*7,Color(GOLD,0.3))
+
+func draw_record_note(start: float, duration: float, current: float, active: bool) -> void:
+	var x := 1050.0-(current-start)*260.0
+	var tail := x+duration*260.0
+	if tail<65 or x>1090: return
+	var color := GOLD if active or duration>=0.3 else CYAN
+	if duration>0:
+		draw_line(Vector2(clampf(x,65,1090),460),Vector2(clampf(tail,65,1090),460),Color(color,0.6),16)
+		draw_circle(Vector2(clampf(tail,65,1090),460),8,color)
+	if x>=65: draw_circle(Vector2(x,460),13,color)
 
 func panel_style() -> StyleBoxFlat:
 	var s := StyleBoxFlat.new()
