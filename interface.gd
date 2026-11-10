@@ -1,8 +1,9 @@
 extends RefCounted
 
-const MINT = Color("74e3cf")
-const PURPLE = Color("b4a5ed")
-const MUTED = Color("a0abc1")
+const MINT = Color("ff715c")
+const INK = Color("29263d")
+const PURPLE = Color("7961bc")
+const MUTED = Color("706b7c")
 var g: Control
 var home: Control
 var rooms: Control
@@ -17,6 +18,7 @@ var reward_shop: Button
 var role: Label
 var budget: Label
 var tips: Label
+var key_hint: Label
 var account_button: Button
 var profile_summary: Label
 var auth_notice: Label
@@ -51,8 +53,9 @@ func style(color: Color, border: Color, width := 1) -> StyleBoxFlat:
 	s.content_margin_right = 20
 	s.content_margin_top = 10
 	s.content_margin_bottom = 10
-	s.shadow_color = Color(0,0,0,0.12)
-	s.shadow_size = 8
+	s.shadow_color = Color(0.2,0.14,0.3,0.07)
+	s.shadow_offset = Vector2(0,5)
+	s.shadow_size = 12
 	return s
 
 func group() -> Control:
@@ -61,21 +64,21 @@ func group() -> Control:
 	g.add_child(c)
 	return c
 
-func text(parent: Node, value: String, x: float, y: float, size: int, color := Color.WHITE) -> Label:
+func text(parent: Node, value: String, x: float, y: float, size: int, color := INK) -> Label:
 	var l := Label.new()
 	l.text = value
 	l.position = Vector2(x,y)
 	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	l.add_theme_font_size_override("font_size",size)
-	l.add_theme_color_override("font_color",color)
+	l.add_theme_color_override("font_color",Color("bf4939") if color==MINT else color)
 	parent.add_child(l)
 	return l
 
-func card(parent: Node, rect: Rect2, accent := Color("34425a")) -> Panel:
+func card(parent: Node, rect: Rect2, accent := Color("e4ded8")) -> Panel:
 	var p := Panel.new()
 	p.position = rect.position
 	p.size = rect.size
-	p.add_theme_stylebox_override("panel",style(Color("18233a"),accent))
+	p.add_theme_stylebox_override("panel",style(Color("fffdf9"),accent))
 	parent.add_child(p)
 	return p
 
@@ -87,15 +90,17 @@ func button(parent: Node, value: String, rect: Rect2, action: Callable, primary 
 	b.pivot_offset = rect.size/2
 	b.focus_mode = Control.FOCUS_NONE
 	b.add_theme_font_size_override("font_size",18)
-	b.add_theme_color_override("font_color",Color("122c31") if primary else Color("edf1fa"))
-	b.add_theme_color_override("font_hover_color",Color("122c31"))
-	b.add_theme_stylebox_override("normal",style(MINT if primary else Color("23304a"),MINT if primary else Color("40506b")))
-	b.add_theme_stylebox_override("hover",style(Color("b7eadf"),MINT))
+	b.add_theme_color_override("font_color",INK if primary else INK)
+	b.add_theme_color_override("font_hover_color",INK)
+	b.add_theme_color_override("font_pressed_color",INK)
+	b.add_theme_color_override("font_disabled_color",MUTED)
+	b.add_theme_stylebox_override("normal",style(MINT if primary else Color("fffdf9"),MINT if primary else Color("ded6d0")))
+	b.add_theme_stylebox_override("hover",style(Color("ffe4dc"),MINT))
 	b.add_theme_stylebox_override("pressed",style(PURPLE,PURPLE))
-	b.add_theme_stylebox_override("disabled",style(Color("222b3e"),Color("303b51")))
+	b.add_theme_stylebox_override("disabled",style(Color("ece7e1"),Color("ded6d0")))
 	b.pressed.connect(action)
 	b.mouse_entered.connect(func():
-		if not b.disabled: b.create_tween().set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT).tween_property(b,"scale",Vector2(1.025,1.025),0.16))
+		if not b.disabled: b.create_tween().set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT).tween_property(b,"scale",Vector2(1.018,1.018),0.16))
 	b.mouse_exited.connect(func(): b.create_tween().set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT).tween_property(b,"scale",Vector2.ONE,0.18))
 	parent.add_child(b)
 	return b
@@ -106,8 +111,12 @@ func edit(parent: Node, placeholder: String, rect: Rect2) -> LineEdit:
 	e.size = rect.size
 	e.placeholder_text = placeholder
 	e.add_theme_font_size_override("font_size",21)
-	e.add_theme_stylebox_override("normal",style(Color("111a2c"),Color("40506b")))
-	e.add_theme_stylebox_override("focus",style(Color("19283b"),MINT,2))
+	e.add_theme_color_override("font_color",INK)
+	e.add_theme_color_override("font_placeholder_color",MUTED)
+	e.add_theme_color_override("caret_color",INK)
+	e.add_theme_color_override("selection_color",Color("d9c9f3"))
+	e.add_theme_stylebox_override("normal",style(Color("f4f0ea"),Color("ded6d0")))
+	e.add_theme_stylebox_override("focus",style(Color("fffdf9"),MINT,2))
 	parent.add_child(e)
 	return e
 
@@ -117,14 +126,27 @@ func selector(parent: Node, rect: Rect2, values: Array) -> OptionButton:
 	o.size = rect.size
 	o.focus_mode = Control.FOCUS_NONE
 	o.add_theme_font_size_override("font_size",17)
-	o.add_theme_stylebox_override("normal",style(Color("24334d"),Color("485872")))
-	o.add_theme_stylebox_override("hover",style(Color("314363"),MINT))
+	o.add_theme_color_override("font_color",INK)
+	o.add_theme_color_override("font_hover_color",INK)
+	o.add_theme_color_override("font_pressed_color",INK)
+	o.add_theme_color_override("font_disabled_color",MUTED)
+	o.add_theme_constant_override("modulate_arrow",1)
+	var popup := o.get_popup()
+	popup.add_theme_color_override("font_color",INK)
+	popup.add_theme_color_override("font_hover_color",INK)
+	popup.add_theme_font_size_override("font_size",17)
+	popup.add_theme_stylebox_override("panel",style(Color("fffdf9"),Color("ded6d0")))
+	popup.add_theme_stylebox_override("hover",style(Color("f1e8fc"),Color("f1e8fc")))
+	o.add_theme_stylebox_override("normal",style(Color("f4f0ea"),Color("ded6d0")))
+	o.add_theme_stylebox_override("hover",style(Color("f1e8fc"),MINT))
+	o.add_theme_stylebox_override("pressed",style(Color("e7dbf6"),PURPLE))
+	o.add_theme_stylebox_override("disabled",style(Color("eee8e2"),Color("ded6d0")))
 	for v in values: o.add_item(str(v))
 	parent.add_child(o)
 	return o
 
 func build() -> void:
-	g.title = text(g,"P / PERFECTO",48,26,25,MINT)
+	g.title = text(g,"perfecto!",48,26,25,MINT)
 	button(g,"대전",Rect2(520,24,100,44),func():
 		if g.phase=="lobby": page="rooms")
 	button(g,"스킨 상점",Rect2(635,24,160,44),func():
@@ -136,8 +158,9 @@ func build() -> void:
 	g.result = text(g,"",50,240,34)
 	g.tally = text(g,"P1  00000    :    00000  P2",680,124,19,PURPLE)
 	g.hint = text(g,"",50,580,17,MUTED)
-	role = text(g,"",50,182,16,MINT)
+	role = text(g,"",50,182,16,PURPLE)
 	budget = text(g,"",50,321,15,MINT)
+	key_hint = text(g,"SPACE",932,555,19,INK)
 	tips = text(g,"SPACE  리듬 입력     ·     TAP  짧게 누르기     ·     HOLD  끝까지 유지",50,630,16,MUTED)
 	button(g,"메인으로",Rect2(964,642,140,44),func():
 		g.socket.close()
@@ -151,18 +174,21 @@ func build() -> void:
 	reward_shop.hide()
 
 	home = group()
-	text(home,"MAKE A LITTLE RHYTHM.",50,143,15,PURPLE)
-	text(home,"너의 리듬으로,\n새로운 한 판.",46,184,54)
-	text(home,"친구와 주고받는 여덟 개의 비트.\n한 번은 공격하고, 한 번은 따라 쳐봐.",50,355,19,MUTED)
+	text(home,"PLAY IT. FEEL IT. SEND IT.",50,143,15,PURPLE)
+	text(home,"리듬을 던져.\n완벽하게 받아쳐.",46,184,54)
+	text(home,"네 손끝에서 시작되는 리듬 배틀.\n8개의 비트를 만들고, 친구의 한 수를 받아쳐!",50,355,19,MUTED)
 	button(home,"친구와 대전  →",Rect2(50,462,300,66),func(): page="rooms",true)
 	g.practice_button = button(home,"가볍게 연습",Rect2(370,462,210,66),g.start_practice)
 	profile_summary = text(home,"게스트로 바로 플레이할 수 있어요.",50,565,17,MUTED)
-	var feature := card(home,Rect2(665,176,438,375),Color("655d86"))
-	text(feature,"PLAY · EARN · PERSONALIZE",28,26,14,PURPLE)
-	text(feature,"나만의 리듬, 나만의 컬러",28,72,25)
-	text(feature,"● ━━━  ●   ● ━━",28,134,31,MINT)
-	text(feature,"승리의 보상으로 스킨을 모으고,\n랭크전에서 레이팅에 도전하세요.",28,220,18,MUTED)
-	text(feature,"일반전  /  스피드전  /  랭크전 β",28,316,16,PURPLE)
+	var illustration := preload("res://art.gd").new()
+	illustration.position = Vector2(658,133)
+	illustration.size = Vector2(450,400)
+	home.add_child(illustration)
+	text(home,"YOUR BEAT. YOUR BATTLE.",713,541,16,PURPLE)
+	var features := ["01   비트를 만들고","02   타이밍을 맞추고","03   나만의 스킨으로"]
+	for i in range(3):
+		var strip := card(home,Rect2(50+i*304,607,286,49))
+		text(strip,str(features[i]),18,11,16,MUTED)
 
 	rooms = group()
 	text(rooms,"오늘은 어떤 한 판?",50,169,35)
@@ -178,7 +204,7 @@ func build() -> void:
 	speed_select.item_selected.connect(func(_i): options_changed())
 	text(a,"랭크전은 3라운드 · 1.0x 고정 / 양쪽 로그인 필요",24,227,14,MUTED)
 	button(a,"이 설정으로 방 만들기  →",Rect2(24,270,458,55),func(): g.connect_room("create"),true)
-	var b := card(rooms,Rect2(578,231,526,347),Color("655d86"))
+	var b := card(rooms,Rect2(578,231,526,347),Color("c8b6e6"))
 	text(b,"친구의 방에 참가",24,20,25)
 	text(b,"친구가 알려준 코드를 입력하세요.",24,78,17,MUTED)
 	g.code = edit(b,"6자리 방 코드",Rect2(24,125,478,60))
@@ -197,7 +223,7 @@ func build() -> void:
 	g.lobby.hide()
 
 	waiting = group()
-	var w := card(waiting,Rect2(100,185,952,390),Color("655d86"))
+	var w := card(waiting,Rect2(100,185,952,390),Color("c8b6e6"))
 	text(w,"OUR PRIVATE ROOM",32,25,15,PURPLE)
 	waiting_code = text(w,"연결 중…",32,66,54,MINT)
 	button(w,"코드 복사",Rect2(708,82,208,50),func(): DisplayServer.clipboard_set(room_code))
@@ -223,7 +249,7 @@ func build() -> void:
 	password_edit.max_length = 128
 	button(login_card,"로그인",Rect2(24,238,284,60),func(): submit_auth("login"),true)
 	button(login_card,"새 계정 만들기",Rect2(326,238,296,60),func(): submit_auth("register"))
-	var p := card(auth,Rect2(720,239,384,350),Color("655d86"))
+	var p := card(auth,Rect2(720,239,384,350),Color("c8b6e6"))
 	text(p,"YOUR PLAYER CARD",24,24,15,PURPLE)
 	auth_notice = text(p,"게스트로도 친구 대전이 가능해요.",24,83,17,MUTED)
 	button(p,"로그아웃",Rect2(24,262,336,55),func(): g.account_action("logout"))
@@ -236,7 +262,12 @@ func build() -> void:
 		var item: Dictionary = g.catalog[i]
 		var c := card(shop,Rect2(50+i*268,289,250,278),Color(str(item.color)))
 		text(c,str(item.name),20,22,22)
-		text(c,"● ━━━",22,86,30,Color(str(item.color)))
+		var swatch := preload("res://art.gd").new()
+		swatch.mode = "skin"
+		swatch.tint = Color(str(item.color))
+		swatch.position = Vector2(18,75)
+		swatch.size = Vector2(214,72)
+		c.add_child(swatch)
 		text(c,"기본 스킨" if int(item.price)==0 else "%d 코인" % int(item.price),22,151,18,MUTED)
 		var skin_id: String = str(item.id)
 		var buy := button(c,"",Rect2(18,204,214,52),func(): skin_action(skin_id))
@@ -310,6 +341,7 @@ func sync(delta := 0.0) -> void:
 	role.visible = in_game
 	budget.visible = g.phase=="record"
 	tips.visible = in_game
+	key_hint.visible = g.phase in ["record","play"]
 	if g.phase=="record":
 		role.text = "01 / CREATE   ·   너의 리듬을 만들어봐"
 		budget.text = "NOTE BUDGET   %d / 8     ·     롱 노트는 1초당 1개" % g.used

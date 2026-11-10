@@ -41,6 +41,7 @@ var room_settings := {"mode":"casual","rounds":3,"speed":1.0}
 var room_players: Array = []
 var reward_text := ""
 var match_finished := false
+var judgment_tween: Tween
 var skin_color := CYAN
 var catalog: Array = [
 	{"id":"mint","name":"민트 펄스","price":0,"color":"54f4d4"},
@@ -175,7 +176,7 @@ func begin_record() -> void:
 	down = -1
 	origin = -1
 	next_button.hide()
-	result.add_theme_color_override("font_color",Color.WHITE)
+	result.add_theme_color_override("font_color",Color("29263d"))
 	result.text = "SPACE로 리듬을 만드세요"
 	hint.text = "첫 입력부터 녹음 · 8개를 채우면 자동 전송 · 최대 30초"
 
@@ -226,7 +227,7 @@ func receive(m: Dictionary) -> void:
 			match_finished = bool(m.finished)
 			phase = "result"
 			update_scores(m.scores)
-			result.add_theme_color_override("font_color",Color.WHITE)
+			result.add_theme_color_override("font_color",Color("29263d"))
 			result.text = "수비 점수 +%d" % int(m.points)
 			if m.finished:
 				result.text = "무승부!" if m.scores[0] == m.scores[1] else "P%d 승리!" % (1 if m.scores[0]>m.scores[1] else 2)
@@ -305,7 +306,12 @@ func finish_record_note() -> void:
 func show_judgment(error: float) -> void:
 	var j := 0 if error<=0.035 else 1 if error<=0.08 else 2 if error<=0.18 else 3
 	result.text = NAMES[j]
-	result.add_theme_color_override("font_color", [CYAN,GOLD,Color.WHITE,Color("ff688b")][j])
+	if judgment_tween and judgment_tween.is_valid(): judgment_tween.kill()
+	result.pivot_offset = Vector2(0,22)
+	result.scale = Vector2(1.055,1.055)
+	judgment_tween = create_tween().set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	judgment_tween.tween_property(result,"scale",Vector2.ONE,0.18)
+	result.add_theme_color_override("font_color", [Color("208e77"),Color("a05c12"),Color("7961bc"),Color("dc4d65")][j])
 
 func judge_tap(t: float) -> void:
 	var best := -1
@@ -387,20 +393,30 @@ func _process(delta: float) -> void:
 	queue_redraw()
 
 func _draw() -> void:
-	for gx in range(0,1152,96):
-		draw_line(Vector2(gx,0),Vector2(gx,720),Color(0.2,0.25,0.36,0.07),1)
-	for gy in range(0,720,96):
-		draw_line(Vector2(0,gy),Vector2(1152,gy),Color(0.2,0.25,0.36,0.07),1)
-	draw_arc(Vector2(1100,80),210,0,TAU,80,Color(0.64,0.54,1,0.1),60)
-	draw_line(Vector2(48,84),Vector2(1104,84),Color("29334d"),1)
+	# A warm paper canvas, restrained print marks, and two soft color fields.
+	draw_circle(Vector2(1090,690),200,Color("efe5f6"))
+	draw_circle(Vector2(-40,420),140,Color("fce7dc"))
+	for x in range(50,1110,24): draw_circle(Vector2(x,705),1,Color("dbd1ca"))
+	draw_line(Vector2(48,92),Vector2(1104,92),Color("ded6d0"),1)
 	if not phase in ["record","play"]: return
+	var key_style := StyleBoxFlat.new()
+	key_style.bg_color = Color("ffd6c9") if down>=0 else Color("fffdf9")
+	key_style.border_color = Color("ff715c") if down>=0 else Color("ded6d0")
+	key_style.set_border_width_all(2)
+	key_style.set_corner_radius_all(14)
+	draw_style_box(key_style,Rect2(870,545,232,55))
 	var y := 460.0
-	var left := 180.0
+	var left := 1050.0 if phase=="record" else 180.0
 	draw_style_box(panel_style(), Rect2(48,355,1056,165))
 	for x in range(200,1080,80): draw_line(Vector2(x,370),Vector2(x,505),Color(0.15,0.2,0.3),1)
-	draw_line(Vector2(65,y),Vector2(1085,y),Color("445471"),2)
+	draw_line(Vector2(65,y),Vector2(1085,y),Color("605972"),2)
 	draw_line(Vector2(left,370),Vector2(left,505),CYAN,3+flash*5)
 	draw_circle(Vector2(left,y),19+flash*7,Color(CYAN,0.12+flash*0.3))
+	if flash>0:
+		for i in range(8):
+			var angle := i*TAU/8
+			var start := Vector2(left,y)+Vector2(cos(angle),sin(angle))*(25+(1-flash)*20)
+			draw_line(start,start+Vector2(cos(angle),sin(angle))*9,Color(CYAN,flash),2,true)
 	if phase=="play":
 		var t := (now()-origin)*speed
 		for i in range(notes.size()):
@@ -411,12 +427,12 @@ func _draw() -> void:
 			if float(n.d)>0:
 				draw_line(Vector2(maxf(x,65),y),Vector2(minf(tail,1090),y),Color(skin_color,0.45),16)
 				draw_circle(Vector2(clampf(tail,65,1090),y),8,skin_color)
-			if x>=65: draw_circle(Vector2(x,y),13,GOLD if float(n.d)>0 else skin_color)
+			if x>=65: draw_note(Vector2(x,y),GOLD if float(n.d)>0 else skin_color)
 	elif phase=="record":
 		var current := maxf(0,now()-origin) if origin>=0 else 0.0
 		var pending_units := maxi(1,ceili(minf(current-down,8-used))) if down>=0 else 0
 		for i in range(8):
-			draw_circle(Vector2(280+i*90,390),8,CYAN if i<used else (GOLD if i<used+pending_units else Color("283751")))
+			draw_circle(Vector2(280+i*90,390),8,CYAN if i<used else (GOLD if i<used+pending_units else Color("625c76")))
 		for n in notes:
 			draw_record_note(float(n.t),float(n.d),current,false)
 		if down>=0:
@@ -431,11 +447,16 @@ func draw_record_note(start: float, duration: float, current: float, active: boo
 	if duration>0:
 		draw_line(Vector2(clampf(x,65,1090),460),Vector2(clampf(tail,65,1090),460),Color(color,0.6),16)
 		draw_circle(Vector2(clampf(tail,65,1090),460),8,color)
-	if x>=65: draw_circle(Vector2(x,460),13,color)
+	if x>=65: draw_note(Vector2(x,460),color)
+
+func draw_note(pos: Vector2, color: Color) -> void:
+	draw_circle(pos+Vector2(0,4),16,Color(0,0,0,0.24))
+	draw_circle(pos,16,color)
+	draw_arc(pos,13,PI*1.12,PI*1.8,14,Color(1,1,1,0.65),2,true)
 
 func panel_style() -> StyleBoxFlat:
 	var s := StyleBoxFlat.new()
-	s.bg_color = Color("17223a")
+	s.bg_color = Color("29263d")
 	s.corner_radius_top_left = 16
 	s.corner_radius_top_right = 16
 	s.corner_radius_bottom_left = 16
