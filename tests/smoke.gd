@@ -6,6 +6,8 @@ func run() -> void:
 	game = load("res://main.tscn").instantiate()
 	root.add_child(game)
 	await process_frame
+	game.preferences.values.key="SPACE"
+	game.preferences.values.offset_ms=0
 	await create_timer(0.6).timeout
 	game.start_practice()
 	assert(game.phase == "record")
@@ -29,6 +31,8 @@ func run() -> void:
 		game.down = i*0.5
 		game.finish_record_note()
 	assert(game.notes.size()==8)
+	assert(game.phase=="review")
+	game.confirm_pattern()
 	assert(game.phase=="play")
 	game.judge_tap(0.0)
 	assert(game.result.text=="perfecto!!!")
@@ -37,7 +41,11 @@ func run() -> void:
 	game.judge_hold(0.0,2.0)
 	assert(game.result.text=="perfecto!!!")
 	game.resolved.clear()
+	game.live_judgments.clear()
 	game.judge_hold(0.0,0.5)
 	assert(game.result.text=="water XXXX")
 	print("GODOT_SMOKE_OK: UI, recording, replay, tap and hold judgments")
-	quit()
+	await create_timer(0.45).timeout
+	game.queue_free()
+	await process_frame
+	call_deferred("quit")

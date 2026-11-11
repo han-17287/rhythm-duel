@@ -1,6 +1,7 @@
 """Two-player room relay. Deploy behind TLS for public use."""
 import asyncio, json, math, secrets, os, time, mimetypes, uuid, logging
 from accounts import Store, AccountError, CATALOG
+from assets import read_asset, accepts_gzip
 from pathlib import Path
 from urllib.parse import urlsplit, unquote
 from http import HTTPStatus
@@ -24,9 +25,24 @@ async def serve_game(connection, request):
     candidate=(STATIC_DIR/('index.html' if path=='/' else path.lstrip('/'))).resolve()
     if not candidate.is_relative_to(STATIC_DIR) or not candidate.is_file():
         return http_response(404,b'Not found')
-    body=await asyncio.to_thread(candidate.read_bytes)
-    mime='application/wasm' if candidate.suffix=='.wasm' else mimetypes.guess_type(candidate.name)[0] or 'application/octet-stream'
-    return http_response(200,body,mime)
+    original=candidate
+    compressed=candidate.with_name(candidate.name+'.gz')
+    gzip_enabled=accepts_gzip(request.headers.get('Accept-Encoding','')) and compressed.is_file()
+    if gzip_enabled: candidate=compressed
+    stat=candidate.stat()
+    etag=f'"{stat.st_mtime_ns:x}-{stat.st_size:x}"'
+    if request.headers.get('If-None-Match')==etag:
+        response=http_response(304,b'')
+        response.headers['ETag']=etag
+        response.headers['Vary']='Accept-Encoding'
+        return response
+    body=await read_asset(candidate,stat)
+    mime='application/wasm' if original.suffix=='.wasm' else mimetypes.guess_type(original.name)[0] or 'application/octet-stream'
+    response=http_response(200,body,mime)
+    response.headers['ETag']=etag
+    response.headers['Vary']='Accept-Encoding'
+    if gzip_enabled: response.headers['Content-Encoding']='gzip'
+    return response
 
 def validate(notes):
     if not isinstance(notes, list) or not 1 <= len(notes) <= 8: raise ValueError('노트 개수 오류')
@@ -39,20 +55,7 @@ def validate(notes):
     if budget!=8: raise ValueError('8개를 모두 사용하세요')
     return clean
 
-def score(notes, hits):
-    if not isinstance(hits,list) or len(hits)>64: raise ValueError('입력 개수 오류')
-    used=set(); total=0; judgments=[]
-    for n in notes:
-        candidates=[(abs(float(h['t'])-n['t']),i,h) for i,h in enumerate(hits) if i not in used and isinstance(h,dict) and math.isfinite(float(h['t'])) and math.isfinite(float(h['d'])) and float(h['d'])>=0]
-        best=min(candidates, default=None, key=lambda v:v[0]); error=999.0
-        if best and best[0]<=0.18:
-            _,i,h=best; used.add(i)
-            error=max(best[0],abs((float(h['t'])+float(h['d']))-(n['t']+n['d']))) if n['d']>=0.3 else best[0]
-        j=0 if error<=0.035 else 1 if error<=0.08 else 2 if error<=0.18 else 3
-        total += [1000,700,400,0][j]*max(1,math.ceil(n['d']))
-        judgments.append(j)
-    total=max(0,total-200*(len(hits)-len(used)))
-    return total,judgments
+from scoring import score, analyze
 
 store = Store.from_env()
 auth_attempts = {}
@@ -73,8 +76,8 @@ async def broadcast(r, **data):
 async def room_state(r):
     await broadcast(r,type='room',settings=r['settings'],players=r['names'],count=len(r['players']))
 async def turn(r):
-    r['phase']='record'; r['deadline']=time.monotonic()+45
-    await broadcast(r,type='turn',turn=r['turn'],attacker=r['turn']%2,scores=r['scores'],speed=turn_speed(r),settings=r['settings'])
+    r['phase']='record'; r['turn_started']=time.monotonic(); r['deadline']=time.monotonic()+45; r['progress_at']=0; r['activity_at']=0
+    await broadcast(r,type='turn',turn=r['turn'],attacker=(r['turn']+r.get('first_attacker',0))%2,scores=r['scores'],speed=turn_speed(r),settings=r['settings'])
 async def award(r,forfeit=None):
     if r.get('awarded'): return
     changes=await asyncio.to_thread(store.settle,r['id'],r['users'],r['scores'],r['settings']['mode']=='ranked',forfeit)
@@ -145,8 +148,10 @@ async def handle(ws):
                     room=code; slot=len(r['players']); r['players'].append(ws); r['users'].append(uid); r['names'].append(name)
                     await send(ws,type='joined',code=code,slot=slot,settings=r['settings'])
                     await room_state(r)
+                elif typ=='leave' and room not in rooms:
+                    room=None;slot=-1;await send(ws,type='leave_ok')
                 elif room in rooms:
-                    r=rooms[room]; attacker=r['turn']%2
+                    r=rooms[room]; attacker=(r['turn']+r.get('first_attacker',0))%2
                     if typ=='leave':
                         await abandon(room,slot); room=None; slot=-1; await send(ws,type='leave_ok')
                     elif typ=='configure' and r['phase']=='waiting' and slot==0:
@@ -156,6 +161,44 @@ async def handle(ws):
                     elif typ=='start' and r['phase']=='waiting' and slot==0:
                         if len(r['players'])!=2: raise ValueError('친구가 참가하면 시작할 수 있습니다')
                         await turn(r)
+                    elif typ=='draft' and r['phase']=='record' and slot==attacker:
+                        r['draft']=validate(m['notes']); r['phase']='review'
+                        r['deadline']=min(time.monotonic()+90,r['turn_started']+150)
+                        await send(ws,type='draft_ready',remaining=max(0,r['deadline']-time.monotonic()))
+                        await send(r['players'][1-slot],type='activity',units=8,review=True)
+                    elif typ=='edit' and r['phase'] in ('record','review') and slot==attacker:
+                        r['phase']='record'; r.pop('draft',None)
+                        r['deadline']=min(time.monotonic()+45,r['turn_started']+150)
+                        await send(r['players'][1-slot],type='activity',units=0,review=False)
+                    elif typ=='activity' and r['phase']=='record' and slot==attacker:
+                        units=m.get('units',0)
+                        if type(units) is not int or not 0<=units<=8: raise ValueError('잘못된 진행률')
+                        if time.monotonic()-r.get('activity_at',0)>.2:
+                            r['activity_at']=time.monotonic()
+                            await send(r['players'][1-slot],type='activity',units=units,review=False)
+                    elif typ=='confirm' and r['phase']=='review' and slot==attacker:
+                        r['notes']=r.pop('draft'); r['phase']='play'; speed=turn_speed(r)
+                        r['deadline']=time.monotonic()+4+(r['notes'][-1]['t']+r['notes'][-1]['d'])/speed+5
+                        await broadcast(r,type='pattern',notes=r['notes'],speed=speed)
+                    elif typ=='progress' and r['phase']=='play' and slot!=attacker:
+                        combo=m.get('combo',0); units=m.get('resolved',0)
+                        if type(combo) is not int or type(units) is not int or not 0<=combo<=8 or not 0<=units<=8: raise ValueError('잘못된 진행률')
+                        if time.monotonic()-r.get('progress_at',0)>.12:
+                            r['progress_at']=time.monotonic()
+                            await send(r['players'][attacker],type='progress',combo=combo,resolved=units)
+                    elif typ=='emote':
+                        emote=m.get('emote','')
+                        if emote not in ('준비 완료!','좋은 리듬!','한 판 더!','멋진 수비!'): raise ValueError('없는 메시지')
+                        if time.monotonic()-r.get('emote_at_'+str(slot),0)>2:
+                            r['emote_at_'+str(slot)]=time.monotonic()
+                            await broadcast(r,type='emote',slot=slot,text=emote)
+                    elif typ=='rematch' and r['phase']=='finished':
+                        votes=r.setdefault('rematch',[])
+                        if slot not in votes: votes.append(slot)
+                        await broadcast(r,type='rematch_state',votes=votes)
+                        if len(votes)==2:
+                            r.update(id=uuid.uuid4().hex,turn=0,scores=[0,0],awarded=False,rematch=[],first_attacker=1-r.get('first_attacker',0))
+                            await turn(r)
                     elif typ=='pattern' and r['phase']=='record' and slot==attacker:
                         r['notes']=validate(m['notes']); r['phase']='play'
                         speed=turn_speed(r)
@@ -163,10 +206,18 @@ async def handle(ws):
                         await broadcast(r,type='pattern',notes=r['notes'],speed=speed)
                     elif typ=='result' and r['phase']=='play' and slot!=attacker:
                         if time.monotonic()<r['deadline']-5.3: raise ValueError('아직 연주 중입니다')
-                        points,judgments=score(r['notes'],m['hits']); r['scores'][slot]+=points
+                        reported_hits=m['hits']
+                        overflow=isinstance(reported_hits,list) and len(reported_hits)>64
+                        report=analyze(r['notes'],reported_hits[:64] if overflow else reported_hits)
+                        if overflow:
+                            report['extra']+=len(reported_hits)-64
+                            report['points']=0;report['accuracy']=0.0;report['grade']='D'
+                            report['full_combo']=False;report['all_perfect']=False
+                            report['warning']='추가 입력이 너무 많아 이번 수비는 0점입니다.'
+                        points=report['points']; judgments=report['judgments']; r['scores'][slot]+=points
                         finished=r['turn']==r['settings']['rounds']*2-1
                         r['phase']='finished' if finished else 'result'; r['deadline']=time.monotonic()+120
-                        await broadcast(r,type='result',points=points,judgments=judgments,scores=r['scores'],finished=finished)
+                        await broadcast(r,type='result',points=points,judgments=judgments,scores=r['scores'],finished=finished,report=report,defender=slot)
                         if finished: await award(r)
                     elif typ=='next' and r['phase']=='result' and slot==0:
                         r['turn']+=1; await turn(r)
@@ -192,6 +243,6 @@ async def cleanup():
                 await broadcast(r,type='error',message='제한 시간이 지나 방을 닫습니다')
                 for w in r['players']: await w.close()
 async def main():
-    async with serve(handle,'0.0.0.0',int(os.getenv('PORT','8765')),max_size=16384,ping_interval=20,process_request=serve_game):
+    async with serve(handle,'0.0.0.0',int(os.getenv('PORT','8765')),max_size=16384,ping_interval=20,open_timeout=120,process_request=serve_game):
         await cleanup()
 if __name__=='__main__': asyncio.run(main())

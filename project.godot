@@ -2,11 +2,18 @@ config_version=5
 [application]
 config/server_url="wss://rhythm-duel.onrender.com"
 config/name="PERFECTO • Rhythm Duel"
+config/icon="res://assets/icon.svg"
+boot_splash/image="res://assets/splash.png"
+boot_splash/bg_color=Color(0.071,0.067,0.133,1)
+boot_splash/fullsize=false
 run/main_scene="res://main.tscn"
+[autoload]
+PerfectoAudio="*res://gameplay/sound_bank.gd"
 [display]
 window/size/viewport_width=1152
 window/size/viewport_height=720
 window/stretch/mode="canvas_items"
+window/stretch/aspect="keep"
 [rendering]
 renderer/rendering_method="gl_compatibility"
-environment/defaults/default_clear_color=Color(0.982,0.965,0.937,1)
+environment/defaults/default_clear_color=Color(0.071,0.067,0.133,1)

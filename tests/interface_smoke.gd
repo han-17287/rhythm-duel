@@ -25,7 +25,23 @@ func run() -> void:
 	game.receive({"type":"result","points":8000,"scores":[8000,1000],"finished":true})
 	game.interface.sync()
 	assert(game.result.visible and game.result.text=="P1 승리!")
+	game.receive({"type":"left"})
+	game.interface.sync()
+	assert(not game.interface.gameplay_ui.emotes.visible)
+	game.socket.close()
+	game.connected=true
+	game.phase="review"
+	game.key_held=true
+	game.down=0
+	game.active_hold=0
+	game._process(0)
+	assert(game.phase=="disconnected" and not game.key_held and game.active_hold==-1)
+	assert(game.hint.text.contains("메인으로") and game.interface.account_button.disabled)
+	game.open_menu("home")
+	game.interface.sync()
+	assert(not game.interface.account_button.disabled)
+	await create_timer(0.45).timeout
 	game.queue_free()
 	await process_frame
 	print("INTERFACE_SMOKE_OK: home, rooms, room code, attack, defense, result, production URL")
-	quit()
+	call_deferred("quit")

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
+<defs><radialGradient id="halo"><stop stop-color="#8262d1" stop-opacity=".3"/><stop offset="1" stop-color="#121122" stop-opacity="0"/></radialGradient><linearGradient id="mark" x2="1" y2="1"><stop stop-color="#b0ffe9"/><stop offset="1" stop-color="#59e5db"/></linearGradient></defs>
+<rect width="640" height="360" fill="#121122"/>
+<ellipse cx="320" cy="135" rx="200" ry="155" fill="url(#halo)"/>
+<circle cx="320" cy="111" r="84" fill="none" stroke="#43335e"/>
+<path d="M239 111a81 81 0 0 1 130-65" fill="none" stroke="#b593ff" stroke-width="2"/>
+<rect x="261" y="51" width="118" height="118" rx="32" fill="url(#mark)"/>
+<path d="M306 143V77h28c17 0 26 10 26 24s-9 24-26 24h-12v18z" fill="#151b2c"/>
+<path d="M322 93v16h12c6 0 10-3 10-8s-4-8-10-8z" fill="#6fffe0"/>
+<circle cx="290" cy="139" r="15" fill="#151b2c"/>
+<path d="m279 80 7 7 7-7-7-7z" fill="#a487f0"/>
+<circle cx="404" cy="98" r="4" fill="#f4bd65"/>
+<path d="m228 144 3 7 7 3-7 3-3 7-3-7-7-3 7-3z" fill="#ff83b2"/>
+<text x="320" y="245" text-anchor="middle" font-family="Arial,sans-serif" font-size="48" letter-spacing="-2" fill="#eeebff">perfecto!</text>
+<text x="320" y="280" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" letter-spacing="3" fill="#bda1f4">YOUR BEAT. YOUR BATTLE.</text>
+</svg>

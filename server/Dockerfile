@@ -13,8 +13,9 @@ FROM python:3.12-slim-bookworm
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY server.py accounts.py ./
+COPY server.py accounts.py scoring.py assets.py ./
 COPY --from=web-build /src/rhythm-duel-main/build/web ./static
+RUN chmod a+r /app/*.py /app/requirements.txt && chmod -R a+rX /app/static
 USER 65534:65534
 EXPOSE 8765
 CMD ["python", "-u", "server.py"]
