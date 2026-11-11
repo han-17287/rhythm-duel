@@ -25,21 +25,21 @@ func active() -> bool:
 
 func draw_menu() -> void:
 	var t: float=0 if g.preferences.values.reduced_motion else g.now()
-	g.draw_rect(Rect2(0,0,1152,720),Color("121122"))
+	g.draw_rect(Rect2(0,0,1152,720),Color("090f1e"))
 	g.draw_texture_rect(glows.violet,Rect2(420,-180,950,950),false)
 	g.draw_texture_rect(glows.cyan,Rect2(-340,240,800,800),false)
 	for i in range(22):
 		var x:=float((i*157+83)%1152)
 		var y:=float((i*113+100)%720)
 		g.draw_circle(Vector2(x,y),1.2,Color("bb9ff5")*Color(1,1,1,.13+.08*sin(t*.6+i)))
-	g.draw_line(Vector2(48,92),Vector2(1104,92),Color("403452"),1)
+	g.draw_line(Vector2(48,92),Vector2(1104,92),Color("26384f"),1)
 	g.draw_line(Vector2(48,92),Vector2(166,92),Color("6fffe0"),3,true)
 	if g.phase=="lobby" and g.interface:
-		var tabs: Dictionary={"rooms":Vector2(538,602),"shop":Vector2(655,774),"auth":Vector2(834,1080),"settings":Vector2(403,487)}
+		var tabs: Dictionary={"home":Vector2(269,349),"rooms":Vector2(394,474),"solo":Vector2(519,599),"arcade":Vector2(519,599),"library":Vector2(519,599),"shop":Vector2(644,724),"auth":Vector2(784,986),"settings":Vector2(1022,1050)}
 		if tabs.has(g.interface.page):
 			var span: Vector2=tabs[g.interface.page]
 			g.draw_line(Vector2(span.x,78),Vector2(span.y,78),Color("6fffe0"),2,true)
-	g.draw_line(Vector2(50,694),Vector2(1104,694),Color("403452"),1)
+	g.draw_line(Vector2(50,694),Vector2(1104,694),Color("26384f"),1)
 	for i in range(5):
 		var x: float=1023+i*17
 		var height: float=6+absf(sin(t*1.8+i*.8))*13
@@ -64,7 +64,7 @@ func draw() -> void:
 		var region: int=int(g.Maps.find(g.map_id).region)
 		accent=[Color("66ffe3"),Color("ffd388"),Color("c3a3ff")][region]
 		glow_key=["cyan","coral","violet"][region]
-	g.draw_rect(Rect2(0,0,1152,720),Color("101124"))
+	g.draw_rect(Rect2(0,0,1152,720),Color("070e1c"))
 	g.draw_texture_rect(glows.violet,Rect2(480+sin(t*.25)*30,-160,900,900),false)
 	g.draw_texture_rect(glows[glow_key],Rect2(-220,100,800,800),false)
 	g.draw_colored_polygon(PackedVector2Array([Vector2(110,-20),Vector2(650+sin(t*.3)*40,720),Vector2(180,720)]),Color(accent,.025))
@@ -136,7 +136,7 @@ func draw_progress() -> void:
 		ratio=float(g.used)/8
 		if g.key_held: ratio=minf(1,(g.used+maxf(1,g.now()-g.origin-g.down))/8)
 	else:
-		var end:=maxf(1,float(g.notes[-1].t)+float(g.notes[-1].d))
+		var end:=maxf(1,g.pattern_end())
 		var time: float=((g.paused_at if g.paused else g.now())-g.origin)*g.speed
 		ratio=clampf(time/end,0,1)
 	g.draw_line(Vector2(50,529),Vector2(1102,529),Color("332b4c"),4,true)

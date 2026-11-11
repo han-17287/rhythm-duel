@@ -38,7 +38,7 @@ func load_data() -> void:
 			if pattern is Dictionary and valid_pattern(pattern.get("notes",[])):
 				patterns.append({"id":str(pattern.get("id",patterns.size())),"name":str(pattern.get("name","내 비트")).left(24),"notes":pattern.notes})
 	if data.get("records",{}) is Dictionary:
-		for id in data.records:
+		for id in data.get("records",{}):
 			if records.size()>=1000: break
 			var record=data.records[id]
 			if not record is Dictionary: continue
@@ -67,15 +67,17 @@ func remember(id: String, report: Dictionary) -> bool:
 static func valid_pattern(notes) -> bool:
 	if not notes is Array or notes.is_empty() or notes.size()>8: return false
 	var budget:=0
-	var end:=-0.08
+	var ends:=[-0.08,-0.08]
 	for n in notes:
 		if not n is Dictionary or not n.has("t") or not n.has("d"): return false
 		if not typeof(n.t) in [TYPE_INT,TYPE_FLOAT] or not typeof(n.d) in [TYPE_INT,TYPE_FLOAT]: return false
 		var t:=float(n.t)
 		var d:=float(n.d)
-		if not is_finite(t+d) or t<0 or t>30 or d<0 or d>8 or t<end+0.075: return false
+		var lane=int(n.get("lane",0))
+		if not typeof(n.get("lane",0)) in [TYPE_INT,TYPE_FLOAT] or float(n.get("lane",0))!=lane or lane not in [0,1]:return false
+		if not is_finite(t+d) or t<0 or t>30 or d<0 or d>8 or t<ends[lane]+0.075: return false
 		budget+=maxi(1,ceili(d)) if d>=0.3 else 1
-		end=t+d
+		ends[lane]=t+d
 	return budget==8
 
 func save_pattern(notes: Array) -> bool:
@@ -84,7 +86,7 @@ func save_pattern(notes: Array) -> bool:
 		var same: bool=pattern.notes.size()==notes.size()
 		if same:
 			for i in range(notes.size()):
-				if float(pattern.notes[i].t)!=float(notes[i].t) or float(pattern.notes[i].d)!=float(notes[i].d): same=false
+				if float(pattern.notes[i].t)!=float(notes[i].t) or float(pattern.notes[i].d)!=float(notes[i].d) or int(pattern.notes[i].get("lane",0))!=int(notes[i].get("lane",0)): same=false
 		if same: return true
 	if patterns.size()>=8: return false
 	patterns.append({"id":str(Time.get_unix_time_from_system())+str(randi()),"name":"내 비트 %d"%next_pattern_number,"notes":notes.duplicate(true)})

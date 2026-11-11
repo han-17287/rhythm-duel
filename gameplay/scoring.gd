@@ -20,7 +20,7 @@ static func analyze(notes: Array, hits: Array) -> Dictionary:
 		var best := -1
 		var best_error := INF
 		for i in range(hits.size()):
-			if used.has(i): continue
+			if used.has(i) or int(hits[i].get("lane",0))!=int(note.get("lane",0)): continue
 			var error := absf(float(hits[i].t)-float(note.t))
 			if error<best_error:
 				best_error = error

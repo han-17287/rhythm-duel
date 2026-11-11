@@ -1,9 +1,15 @@
 extends RefCounted
 
-const MINT = Color("6fffe0")
-const INK = Color("f1edff")
-const PURPLE = Color("c2a4ff")
-const MUTED = Color("aaa3c1")
+const Design=preload("res://gameplay/ui_theme.gd")
+var lobby_view: RefCounted
+var room_view: RefCounted
+var account_name: Label
+var account_wallet: Label
+
+const MINT = Color("68ffe0")
+const INK = Color("eef8ff")
+const PURPLE = Color("b89aff")
+const MUTED = Color("9aacc3")
 var main_exit: Button
 var gameplay_ui: RefCounted
 var g: Control
@@ -41,7 +47,7 @@ var heartbeat := 0.0
 var entry_tweens: Dictionary = {}
 var round_values := [1,2,3,4,5,6,7,8,9]
 var speed_values := [0.5,0.75,1.0,1.25,1.5,1.75,2.0]
-var mode_values := ["casual","rush","ranked"]
+var mode_values := ["casual","rush","ranked","double"]
 
 func _init(game: Control) -> void:
 	g = game
@@ -51,14 +57,14 @@ func style(color: Color, border: Color, width := 1) -> StyleBoxFlat:
 	s.bg_color = color
 	s.border_color = border
 	s.set_border_width_all(width)
-	s.set_corner_radius_all(22)
+	s.set_corner_radius_all(12)
 	s.content_margin_left = 20
 	s.content_margin_right = 20
 	s.content_margin_top = 10
 	s.content_margin_bottom = 10
-	s.shadow_color = Color(0.2,0.14,0.3,0.07)
-	s.shadow_offset = Vector2(0,5)
-	s.shadow_size = 12
+	s.shadow_color = Color(0,0,0,0.16)
+	s.shadow_offset = Vector2(0,4)
+	s.shadow_size = 10
 	return s
 
 func group() -> Control:
@@ -73,15 +79,16 @@ func text(parent: Node, value: String, x: float, y: float, size: int, color := I
 	l.position = Vector2(x,y)
 	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	l.add_theme_font_size_override("font_size",size)
+	l.add_theme_font_override("font",Design.font("headline" if size>=30 else "body"))
 	l.add_theme_color_override("font_color",color)
 	parent.add_child(l)
 	return l
 
-func card(parent: Node, rect: Rect2, accent := Color("51436f")) -> Panel:
+func card(parent: Node, rect: Rect2, accent := Color("30425d")) -> Panel:
 	var p := Panel.new()
 	p.position = rect.position
 	p.size = rect.size
-	p.add_theme_stylebox_override("panel",style(Color("211d36"),accent))
+	p.add_theme_stylebox_override("panel",style(Color("131f34"),accent))
 	parent.add_child(p)
 	return p
 
@@ -92,15 +99,16 @@ func button(parent: Node, value: String, rect: Rect2, action: Callable, primary 
 	b.size = rect.size
 	b.pivot_offset = rect.size/2
 	b.focus_mode = Control.FOCUS_NONE
+	b.mouse_default_cursor_shape=Control.CURSOR_POINTING_HAND
 	b.add_theme_font_size_override("font_size",18)
 	b.add_theme_color_override("font_color",Color("142b30") if primary else INK)
-	b.add_theme_color_override("font_hover_color",INK)
-	b.add_theme_color_override("font_pressed_color",INK)
+	b.add_theme_color_override("font_hover_color",Color("142b30") if primary else INK)
+	b.add_theme_color_override("font_pressed_color",Color("142b30") if primary else INK)
 	b.add_theme_color_override("font_disabled_color",MUTED)
-	b.add_theme_stylebox_override("normal",style(MINT if primary else Color("211d36"),MINT if primary else Color("51436f")))
-	b.add_theme_stylebox_override("hover",style(Color("3c3159"),MINT))
-	b.add_theme_stylebox_override("pressed",style(Color("514071"),PURPLE))
-	b.add_theme_stylebox_override("disabled",style(Color("242033"),Color("51436f")))
+	b.add_theme_stylebox_override("normal",style(MINT if primary else Color("131f34"),MINT if primary else Color("30425d")))
+	b.add_theme_stylebox_override("hover",style(MINT.lightened(.15) if primary else Color("203550"),MINT))
+	b.add_theme_stylebox_override("pressed",style(MINT.darkened(.15) if primary else Color("2b4060"),MINT if primary else PURPLE))
+	b.add_theme_stylebox_override("disabled",style(Color("131c2d"),Color("30425d")))
 	b.set_meta("primary",primary)
 	b.add_to_group("perfecto_buttons")
 	if parent==g and value in ["대전","스킨 상점","로그인 / 가입","설정","전체 화면"]:
@@ -110,10 +118,18 @@ func button(parent: Node, value: String, rect: Rect2, action: Callable, primary 
 		g.sounds.play("tick",0.12)
 		action.call())
 	b.mouse_entered.connect(func():
-		if not b.disabled and not g.preferences.values.reduced_motion: b.create_tween().set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT).tween_property(b,"scale",Vector2(1.018,1.018),0.16))
-	b.mouse_exited.connect(func(): b.create_tween().set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT).tween_property(b,"scale",Vector2.ONE,0.18))
+		if not b.disabled:animate_button(b,Vector2(1.018,1.018),.16))
+	b.mouse_exited.connect(func():animate_button(b,Vector2.ONE,.18))
 	parent.add_child(b)
 	return b
+
+func animate_button(b: Button,target: Vector2,duration: float) -> void:
+	var old=b.get_meta("hover_tween") if b.has_meta("hover_tween") else null
+	if old and old.is_valid():old.kill()
+	if g.preferences.values.reduced_motion:b.scale=Vector2.ONE;return
+	var tween:=b.create_tween().set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	tween.tween_property(b,"scale",target,duration)
+	b.set_meta("hover_tween",tween)
 
 func edit(parent: Node, placeholder: String, rect: Rect2) -> LineEdit:
 	var e := LineEdit.new()
@@ -125,8 +141,8 @@ func edit(parent: Node, placeholder: String, rect: Rect2) -> LineEdit:
 	e.add_theme_color_override("font_placeholder_color",MUTED)
 	e.add_theme_color_override("caret_color",INK)
 	e.add_theme_color_override("selection_color",Color("674b99"))
-	e.add_theme_stylebox_override("normal",style(Color("171527"),Color("51436f")))
-	e.add_theme_stylebox_override("focus",style(Color("211d36"),MINT,2))
+	e.add_theme_stylebox_override("normal",style(Color("0c1628"),Color("30425d")))
+	e.add_theme_stylebox_override("focus",style(Color("131f34"),MINT,2))
 	parent.add_child(e)
 	return e
 
@@ -146,12 +162,12 @@ func selector(parent: Node, rect: Rect2, values: Array) -> OptionButton:
 	popup.add_theme_color_override("font_color",INK)
 	popup.add_theme_color_override("font_hover_color",INK)
 	popup.add_theme_font_size_override("font_size",17)
-	popup.add_theme_stylebox_override("panel",style(Color("211d36"),Color("51436f")))
+	popup.add_theme_stylebox_override("panel",style(Color("131f34"),Color("30425d")))
 	popup.add_theme_stylebox_override("hover",style(Color("3a2c53"),Color("3a2c53")))
-	o.add_theme_stylebox_override("normal",style(Color("171527"),Color("51436f")))
+	o.add_theme_stylebox_override("normal",style(Color("0c1628"),Color("30425d")))
 	o.add_theme_stylebox_override("hover",style(Color("3a2c53"),MINT))
 	o.add_theme_stylebox_override("pressed",style(Color("4b3668"),PURPLE))
-	o.add_theme_stylebox_override("disabled",style(Color("242033"),Color("51436f")))
+	o.add_theme_stylebox_override("disabled",style(Color("131c2d"),Color("30425d")))
 	for v in values: o.add_item(str(v))
 	parent.add_child(o)
 	return o
@@ -159,24 +175,53 @@ func selector(parent: Node, rect: Rect2, values: Array) -> OptionButton:
 func decorate_slider(slider: HSlider) -> void:
 	for key in ["slider","grabber_area","grabber_area_highlight"]:
 		var track:=StyleBoxFlat.new()
-		track.bg_color=Color("3b3153") if key=="slider" else Color("6fffe0")
+		track.bg_color=Color("3b3153") if key=="slider" else Color("68ffe0")
 		track.set_corner_radius_all(4)
 		track.content_margin_top=3
 		track.content_margin_bottom=3
 		slider.add_theme_stylebox_override(key,track)
 
+
+func nav_button(value: String, rect: Rect2, destination: String) -> Button:
+	var b:=button(g,value,rect,func():
+		if g.phase!="lobby":return
+		page=destination
+		if destination=="auth":g.open_transport())
+	b.add_to_group("perfecto_menu_nav")
+	b.set_meta("menu_action",destination)
+	b.set_meta("route",destination)
+	return b
+
+func icon_button(kind: String, caption: String, rect: Rect2, action: Callable) -> Button:
+	var b:=button(g,"",rect,action)
+	b.tooltip_text=caption
+	b.add_to_group("perfecto_menu_nav")
+	b.set_meta("menu_action",caption)
+	var icon:=preload("res://gameplay/ui_icon.gd").new()
+	icon.kind=kind
+	icon.size=Vector2(22,22)
+	icon.position=(rect.size-icon.size)/2
+	b.add_child(icon)
+	return b
+
 func build() -> void:
-	g.title = text(g,"perfecto!",48,26,25,MINT)
-	button(g,"대전",Rect2(520,24,100,44),func():
-		if g.phase=="lobby": page="rooms")
-	button(g,"스킨 상점",Rect2(635,24,160,44),func():
-		if g.phase=="lobby": page="shop")
-	account_button = button(g,"로그인 / 가입",Rect2(810,24,294,44),func():
-		if g.phase=="lobby":
-			page="auth"
-			g.open_transport())
-	account_button.add_theme_font_size_override("font_size",16)
+	g.title = text(g,"PERFECTO",48,20,28,MINT)
+	g.title.add_theme_font_override("font",Design.font("display"))
+	text(g,"R H Y T H M   D U E L",50,59,10,MUTED)
+	nav_button("로비",Rect2(255,24,108,44),"home")
+	nav_button("대전",Rect2(380,24,108,44),"rooms")
+	nav_button("맵 여정",Rect2(505,24,108,44),"solo")
+	nav_button("컬렉션",Rect2(630,24,108,44),"shop")
+	account_button = nav_button("",Rect2(770,24,230,44),"auth")
+	var badge=preload("res://gameplay/player_badge.gd").new();badge.position=Vector2(7,6);badge.size=Vector2(32,32);account_button.add_child(badge)
+	account_name=text(account_button,"로그인 / 가입",48,3,13)
+	account_wallet=text(account_button,"게스트로 플레이 중",48,24,10,MUTED)
+	icon_button("gear","설정",Rect2(1016,24,40,44),func():
+		if g.phase=="lobby":page="settings")
+	icon_button("expand","전체 화면",Rect2(1064,24,40,44),g.toggle_fullscreen)
 	g.status = text(g,"",50,124,17,MUTED)
+	g.status.clip_text=true
+	g.status.text_overrun_behavior=TextServer.OVERRUN_TRIM_ELLIPSIS
 	g.result = text(g,"",50,240,34)
 	g.tally = text(g,"P1  00000    :    00000  P2",680,124,19,PURPLE)
 	g.hint = text(g,"",50,580,17,MUTED)
@@ -186,35 +231,25 @@ func build() -> void:
 	tips = text(g,"SPACE  리듬 입력     ·     TAP  짧게 누르기     ·     HOLD  끝까지 유지",50,630,16,MUTED)
 	main_exit=button(g,"메인으로",Rect2(964,642,140,44),func(): g.open_menu("solo" if not g.map_id.is_empty() else "home"))
 	g.next_button = button(g,"다음 공수 시작  →",Rect2(50,455,280,64),func():
-		if g.practice: g.start_practice()
+		if g.practice: g.start_practice(g.is_double())
 		else: g.send_packet({"type":"next"})
 		g.next_button.hide(),true)
 	g.next_button.hide()
 	reward_shop = button(g,"스킨 상점으로  →",Rect2(355,455,280,64),func(): g.open_menu("shop"))
 	reward_shop.hide()
 
-	home = group()
-	text(home,"RHYTHM DUEL  /  ONLINE BATTLE",50,143,14,MINT)
-	text(home,"리듬을 던져.\n완벽하게 받아쳐.",46,184,54)
-	text(home,"네 손끝에서 시작되는 리듬 배틀.\n8개의 비트를 만들고, 친구의 한 수를 받아쳐!",50,355,19,MUTED)
-	button(home,"친구와 대전  →",Rect2(50,462,300,66),func(): page="rooms",true)
-	g.practice_button = button(home,"혼자하기 · 맵",Rect2(370,462,210,66),func(): page="solo")
-	profile_summary = text(home,"게스트로 바로 플레이할 수 있어요.",50,565,17,MUTED)
-	var illustration := preload("res://art.gd").new()
-	illustration.position = Vector2(658,133)
-	illustration.size = Vector2(450,400)
-	home.add_child(illustration)
-	text(home,"CREATE  /  ECHO  /  PERFECTO!",691,541,15,PURPLE)
-	var features := ["01   비트를 만들고","02   타이밍을 맞추고","03   나만의 스킨으로"]
-	for i in range(3):
-		var strip := card(home,Rect2(50+i*304,607,286,49))
-		text(strip,str(features[i]),18,11,16,MUTED)
+	lobby_view=preload("res://gameplay/lobby_view.gd").new(g,self)
+	lobby_view.build()
+	home=lobby_view.page
 
 	rooms = group()
-	text(rooms,"오늘은 어떤 한 판?",50,169,35)
+	text(rooms,"ONLINE / DUEL ARENA",50,123,12,MINT).add_theme_font_override("font",Design.font("display"))
+	text(rooms,"오늘은 어떤 한 판?",48,157,35)
 	var a := card(rooms,Rect2(50,231,506,347))
-	text(a,"새로운 방 만들기",24,20,25)
-	mode_select = selector(a,Rect2(24,74,458,47),["일반전 · 자유로운 친구 대전","스피드전 · 더 빠른 라운드","랭크전 β · 레이팅 도전"])
+	text(a,"방 만들기",88,14,25)
+	text(a,"HOST / CUSTOM RULES",88,49,11,MINT)
+	var a_icon=preload("res://gameplay/ui_icon.gd").new();a_icon.kind="battle";a_icon.position=Vector2(24,13);a_icon.size=Vector2(48,48);a.add_child(a_icon)
+	mode_select = selector(a,Rect2(24,74,458,47),["일반전 · 자유로운 친구 대전","스피드전 · 더 빠른 라운드","랭크전 β · 레이팅 도전","더블 비트 · 두 줄 F / J"])
 	text(a,"라운드 수",24,139,14,MUTED)
 	text(a,"시작 배속",260,139,14,MUTED)
 	rounds_select = selector(a,Rect2(24,164,218,47),["1 라운드","2 라운드","3 라운드","4 라운드","5 라운드","6 라운드","7 라운드","8 라운드","9 라운드"])
@@ -225,10 +260,16 @@ func build() -> void:
 	text(a,"랭크전은 3라운드 · 1.0x 고정 / 양쪽 로그인 필요",24,227,14,MUTED)
 	button(a,"이 설정으로 방 만들기  →",Rect2(24,270,458,55),func(): g.connect_room("create"),true)
 	var b := card(rooms,Rect2(578,231,526,347),Color("9e7bdb"))
-	text(b,"친구의 방에 참가",24,20,25)
+	text(b,"친구 방 참가",88,14,25)
+	text(b,"JOIN / PRIVATE MATCH",88,49,11,PURPLE)
+	var b_icon=preload("res://gameplay/ui_icon.gd").new();b_icon.kind="map";b_icon.position=Vector2(24,13);b_icon.size=Vector2(48,48);b.add_child(b_icon)
 	text(b,"친구가 알려준 코드를 입력하세요.",24,78,17,MUTED)
 	g.code = edit(b,"6자리 방 코드",Rect2(24,125,478,60))
 	g.code.max_length = 6
+	g.code.placeholder_text="ROOM CODE"
+	g.code.alignment=HORIZONTAL_ALIGNMENT_CENTER
+	g.code.add_theme_font_override("font",Design.font("display"))
+	g.code.add_theme_font_size_override("font_size",26)
 	button(b,"코드로 참가  →",Rect2(24,206,478,55),func(): g.connect_room("join"))
 	text(b,"일반전·스피드전은 게스트로도 즐길 수 있어요.",24,288,15,MUTED)
 	button(rooms,"서버 설정",Rect2(50,599,150,43),func(): g.endpoint.visible = not g.endpoint.visible)
@@ -242,20 +283,9 @@ func build() -> void:
 	g.add_child(g.lobby)
 	g.lobby.hide()
 
-	waiting = group()
-	var w := card(waiting,Rect2(100,185,952,390),Color("9e7bdb"))
-	text(w,"OUR PRIVATE ROOM",32,25,15,PURPLE)
-	waiting_code = text(w,"연결 중…",32,66,54,MINT)
-	button(w,"코드 복사",Rect2(708,82,208,50),func(): DisplayServer.clipboard_set(room_code))
-	waiting_rules = text(w,"",32,161,19,PURPLE)
-	waiting_mode = selector(w,Rect2(32,203,280,44),["일반전","스피드전","랭크전 β"])
-	waiting_rounds = selector(w,Rect2(330,203,276,44),["1 라운드","2 라운드","3 라운드","4 라운드","5 라운드","6 라운드","7 라운드","8 라운드","9 라운드"])
-	waiting_speed = selector(w,Rect2(624,203,288,44),["0.50x","0.75x","1.00x","1.25x","1.50x","1.75x","2.00x"])
-	waiting_mode.item_selected.connect(func(_i): waiting_options_changed())
-	waiting_rounds.item_selected.connect(func(_i): waiting_options_changed())
-	waiting_speed.item_selected.connect(func(_i): waiting_options_changed())
-	waiting_players = text(w,"친구를 기다리는 중…",32,257,16)
-	start_button = button(w,"대전 시작  →",Rect2(32,292,880,60),func(): g.send_packet({"type":"start"}),true)
+	room_view=preload("res://gameplay/room_view.gd").new(g,self)
+	room_view.build()
+	waiting=room_view.page
 
 	auth = group()
 	text(auth,"다시 만나서 반가워요.",50,175,35)
@@ -335,6 +365,9 @@ func reveal(node: Control, visible_now: bool) -> void:
 	var key:=node.get_instance_id()
 	if entry_tweens.has(key) and entry_tweens[key].is_valid(): entry_tweens[key].kill()
 	node.visible = visible_now
+	if visible_now:
+		node.modulate.a=1
+		node.position.y=0
 	if visible_now and not g.preferences.values.reduced_motion:
 		node.modulate.a = 0
 		node.position.y = 10
@@ -355,7 +388,7 @@ func sync(delta := 0.0) -> void:
 	reveal(shop,menu and page=="shop")
 	reveal(waiting,g.phase in ["connecting","room"])
 	waiting_code.text = room_code if g.phase=="room" else "연결 중…"
-	waiting_rules.text = "%s  ·  %d 라운드  ·  시작 %.2fx" % [["일반전","스피드전","랭크전 β"][maxi(0,mode_values.find(g.room_settings.mode))],int(g.room_settings.rounds),float(g.room_settings.speed)]
+	waiting_rules.text = "%s  ·  %d 라운드  ·  시작 %.2fx" % [["일반전","스피드전","랭크전 β","더블 비트"][maxi(0,mode_values.find(g.room_settings.mode))],int(g.room_settings.rounds),float(g.room_settings.speed)]
 	waiting_players.text = "  vs  ".join(g.room_players) if g.room_players.size()==2 else "친구에게 방 코드를 보내주세요."
 	waiting_mode.disabled = g.slot!=0 or g.phase!="room"
 	waiting_rounds.disabled = waiting_mode.disabled or g.room_settings.mode=="ranked"
@@ -363,6 +396,10 @@ func sync(delta := 0.0) -> void:
 	start_button.disabled = g.phase!="room" or g.slot!=0 or g.room_players.size()!=2
 	start_button.text = "대전 시작  →" if g.slot==0 else "방장이 시작하기를 기다리는 중…"
 	g.status.visible = not home.visible
+	g.status.position=Vector2(502,122) if menu or waiting.visible else Vector2(50,124)
+	g.status.size.x=602 if menu or waiting.visible else 600
+	g.status.horizontal_alignment=HORIZONTAL_ALIGNMENT_RIGHT if menu or waiting.visible else HORIZONTAL_ALIGNMENT_LEFT
+	g.status.add_theme_font_size_override("font_size",12 if menu or waiting.visible else 17)
 	g.result.visible = in_game or g.phase in ["result","timeout","disconnected"]
 	g.tally.visible = not menu and not waiting.visible and not g.practice
 	g.hint.visible = g.result.visible
@@ -379,12 +416,14 @@ func sync(delta := 0.0) -> void:
 	g.result.position.y = 250 if in_game else 270
 	g.hint.position.y = 580 if in_game else 360
 	if g.profile.is_empty():
-		account_button.text = "로그인 / 가입"
+		account_name.text = "로그인 / 가입"
+		account_wallet.text="게스트로 플레이 중"
 		profile_summary.text = "게스트로 바로 시작 · 로그인하면 보상과 전적 저장"
 		auth_notice.text = "가입하면 레이팅과 스킨을\n계정에 모아둘 수 있어요." if g.accounts_enabled else "계정 저장소 준비 중이에요.\n지금은 게스트 대전을 즐겨요."
 		shop_balance.text = "로그인하고 대전 보상으로 스킨을 모아보세요."
 	else:
-		account_button.text = "%s  ·  %d 코인" % [str(g.profile.name).left(8)+( "…" if str(g.profile.name).length()>8 else ""),int(g.profile.coins)]
+		account_name.text = str(g.profile.name).left(10)+( "…" if str(g.profile.name).length()>10 else "")
+		account_wallet.text="%d COINS  ·  %d RP"%[int(g.profile.coins),int(g.profile.rating)]
 		profile_summary.text = "%s   ·   %d RP   ·   %d승 %d패 %d무" % [g.profile.name,int(g.profile.rating),int(g.profile.wins),int(g.profile.losses),int(g.profile.draws)]
 		auth_notice.text = "%s\n\n%d RP  ·  %d 코인\n\n%d승  %d패  %d무" % [g.profile.name,int(g.profile.rating),int(g.profile.coins),int(g.profile.wins),int(g.profile.losses),int(g.profile.draws)]
 		shop_balance.text = "내 지갑   %d 코인   ·   구매한 스킨은 바로 장착돼요." % int(g.profile.coins)
@@ -397,3 +436,5 @@ func sync(delta := 0.0) -> void:
 		b.disabled = equipped
 
 	if gameplay_ui: gameplay_ui.sync()
+	if lobby_view:lobby_view.sync()
+	if room_view:room_view.sync()

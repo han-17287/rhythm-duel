@@ -72,6 +72,7 @@ def main():
     subprocess.run([godot,'--headless','--path',str(ROOT),'--export-release','Web',str(output/'index.html')],env=env,check=True)
     patch_web_gl(output/'index.js')
     shutil.copyfile(assets/'OFL.txt',output/'OFL.txt')
+    if (assets/'ui/Oxanium-OFL.txt').exists(): shutil.copyfile(assets/'ui/Oxanium-OFL.txt',output/'Oxanium-OFL.txt')
     html=output/'index.html'
     shell=html.read_text()
     shell=shell.replace('<html lang="en">','<html lang="ko">')

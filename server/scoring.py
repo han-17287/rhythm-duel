@@ -9,10 +9,12 @@ def analyze(notes,hits):
         if not isinstance(h,dict): raise ValueError('잘못된 입력')
         t=float(h['t']);d=float(h['d'])
         if not math.isfinite(t+d) or d<0 or d>120 or abs(t)>120: raise ValueError('잘못된 입력 시간')
-        clean.append({'t':t,'d':d})
+        lane=h.get('lane',0)
+        if type(lane) is not int or lane not in (0,1): raise ValueError('잘못된 레인')
+        clean.append({'t':t,'d':d,'lane':lane})
     used=set(); events=[]; total=maximum=combo=best_combo=0; judgments=[]; offsets=[];counts=[0,0,0,0]
     for note in notes:
-        candidates=[(abs(h['t']-note['t']),i,h) for i,h in enumerate(clean) if i not in used]
+        candidates=[(abs(h['t']-note['t']),i,h) for i,h in enumerate(clean) if i not in used and h['lane']==note.get('lane',0)]
         best=min(candidates,default=None,key=lambda x:x[0]);error=math.inf;offset=None
         if best and best[0]<=.180001:
             _,i,h=best;used.add(i);offset=h['t']-note['t'];error=best[0]

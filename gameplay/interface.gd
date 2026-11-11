@@ -24,6 +24,7 @@ var precision: Label
 var live_note: Label
 var activity: Label
 var toast: Label
+var toast_panel: Panel
 var summary_signature := ""
 var score_tween: Tween
 var summary_panel: Panel
@@ -60,6 +61,7 @@ var stage_timer: Label
 var energy: Label
 var footer: Label
 var emotes: OptionButton
+var double_touch: Array=[]
 var touch_input: Button
 
 func _init(game: Control, base_ui: RefCounted) -> void:
@@ -69,9 +71,7 @@ func _init(game: Control, base_ui: RefCounted) -> void:
 func build() -> void:
 	map_ui=preload("res://gameplay/map_interface.gd").new(g,ui)
 	map_ui.build()
-	ui.button(g,"전체 화면",Rect2(200,24,168,44),g.toggle_fullscreen)
-	ui.button(g,"설정",Rect2(385,24,120,44),func():
-		if g.phase=="lobby": ui.page="settings")
+
 	touch_input=Button.new()
 	touch_input.position=Vector2(870,541)
 	touch_input.size=Vector2(232,82)
@@ -80,11 +80,18 @@ func build() -> void:
 	touch_input.button_down.connect(func(): g.pointer_input(true))
 	touch_input.button_up.connect(func(): g.pointer_input(false))
 	g.add_child(touch_input)
+	for lane in range(2):
+		var pad:=Button.new()
+		pad.position=Vector2(870+lane*122,541);pad.size=Vector2(110,82);pad.focus_mode=Control.FOCUS_NONE
+		for state in ["normal","hover","pressed","focus"]:pad.add_theme_stylebox_override(state,StyleBoxEmpty.new())
+		pad.button_down.connect(g.double_beat.press.bind(lane,true));pad.button_up.connect(g.double_beat.press.bind(lane,false))
+		g.add_child(pad);double_touch.append(pad)
 	emotes=ui.selector(g,Rect2(785,124,319,44),["친구에게 한마디","준비 완료!","좋은 리듬!","한 판 더!","멋진 수비!"])
 	emotes.item_selected.connect(func(i):
 		if i>0: g.send_packet({"type":"emote","emote":["","준비 완료!","좋은 리듬!","한 판 더!","멋진 수비!"][i]})
 		emotes.select(0))
-	combo_label=ui.text(g,"",752,210,48,Color("e6d7ff"))
+	combo_label=ui.text(g,"",752,210,44,Color("e6d7ff"))
+	combo_label.add_theme_font_override("font",ui.Design.font("display"))
 	combo_label.add_theme_color_override("font_outline_color",Color("302246"))
 	combo_label.add_theme_constant_override("outline_size",4)
 	precision=ui.text(g,"",755,275,15,Color("b9acd0"))
@@ -92,11 +99,16 @@ func build() -> void:
 	stage_timer=ui.text(g,"",845,334,12,ui.MUTED)
 	energy=ui.text(g,"",755,306,15,ui.PURPLE)
 	activity=ui.text(g,"",50,322,18,ui.PURPLE)
-	toast=ui.text(g,"",50,666,15,ui.PURPLE)
+	toast_panel=ui.card(g,Rect2(50,647,804,42),Color("5a8b9d"))
+	toast_panel.z_index=20
+	toast_panel.mouse_filter=Control.MOUSE_FILTER_IGNORE
+	toast=ui.text(toast_panel,"",20,9,14,Color("d9fff3"))
+	toast.clip_text=true;toast.size.x=764
 	course_page=ui.group()
 	ui.text(course_page,"아케이드 코스",50,166,35)
-	ui.button(course_page,"내 비트 보관함",Rect2(440,166,320,48),g.open_library)
-	ui.button(course_page,"직접 비트 만들기  →",Rect2(780,166,324,48),g.start_practice)
+	ui.button(course_page,"내 비트 보관함",Rect2(408,166,210,48),g.open_library)
+	ui.button(course_page,"직접 비트 만들기  →",Rect2(798,166,306,48),g.start_practice)
+	ui.button(course_page,"더블 비트 F / J",Rect2(630,166,156,48),g.start_double_training).add_theme_font_size_override("font_size",14)
 	var courses: Array = g.Challenges.courses()
 	for i in range(courses.size()):
 		var c: Dictionary = courses[i]
@@ -121,7 +133,7 @@ func build() -> void:
 
 	library_page=ui.group()
 	ui.text(library_page,"내가 만든 여덟 개의 비트.",50,166,35)
-	ui.button(library_page,"돌아가기",Rect2(780,166,324,48),g.close_library)
+	ui.button(library_page,"돌아가기",Rect2(798,166,306,48),g.close_library)
 	library_empty=ui.text(library_page,"아직 저장한 리듬이 없어요. 리듬을 만든 뒤 '보관함에 저장'을 눌러봐요.",50,280,20,ui.MUTED)
 	for i in range(8):
 		var row: Panel=ui.card(library_page,Rect2(50+(i%2)*548,240+(i/2)*90,506,80))
@@ -164,9 +176,11 @@ func build() -> void:
 	medal_art.size=Vector2(150,165)
 	panel.add_child(medal_art)
 	grade=ui.text(panel,"S",42,26,82,Color("fff0c0"))
+	grade.add_theme_font_override("font",ui.Design.font("display"))
 	medal=ui.text(panel,"",24,171,13,Color("d0b3ff"))
 	score_caption=ui.text(panel,"ROUND SCORE",190,16,13,Color("a8a0c3"))
 	points=ui.text(panel,"0",190,42,46,Color("ffffff"))
+	points.add_theme_font_override("font",ui.Design.font("display"))
 	accuracy=ui.text(panel,"정확도 0%",190,107,20,Color("bcb5d1"))
 	max_combo=ui.text(panel,"MAX COMBO 0",190,145,18,Color("cfb6ff"))
 	chart=preload("res://gameplay/timing_chart.gd").new()
@@ -239,7 +253,7 @@ func build() -> void:
 		g.preferences.values.reduced_motion=not g.preferences.values.reduced_motion
 		changed())
 	ui.text(settings_page,"입력 보정은 조금씩 바꾸며 연습실에서 확인해봐요. 설정은 이 기기에 자동 저장됩니다.",50,609,15,ui.MUTED)
-	ui.button(settings_page,"기본값 복원",Rect2(780,166,324,48),reset_settings)
+	ui.button(settings_page,"기본값 복원",Rect2(798,166,306,48),reset_settings)
 
 	pause_panel=ui.group()
 	var shade:=ColorRect.new()
@@ -268,7 +282,9 @@ func sync() -> void:
 	apply_stage_theme(g.stage.active())
 	map_ui.sync()
 	for nav in g.get_tree().get_nodes_in_group("perfecto_menu_nav"):
-		if g.is_ancestor_of(nav) and nav.get_meta("menu_action","")!="전체 화면":nav.disabled=g.phase!="lobby"
+		if g.is_ancestor_of(nav) and nav.get_meta("menu_action","")!="전체 화면":
+			nav.disabled=g.phase!="lobby"
+			nav.modulate=Color(.55,.65,.75,1) if nav.disabled else Color.WHITE
 	if g.stage.active() and not g.result.text in g.NAMES: g.result.add_theme_color_override("font_color",Color("f1ecff"))
 	var menu: bool=g.phase=="lobby"
 	ui.reveal(course_page,menu and ui.page=="arcade")
@@ -286,7 +302,8 @@ func sync() -> void:
 	ui.reveal(review,g.phase=="review")
 	stop_preview.visible=g.phase=="preview"
 	reset_record.visible=(g.phase=="record" and g.used>0) or g.phase=="timeout"
-	touch_input.visible=(g.phase=="record" or (g.phase=="play" and (g.practice or g.slot!=g.attacker))) and not g.paused
+	touch_input.visible=not g.is_double() and (g.phase=="record" or (g.phase=="play" and (g.practice or g.slot!=g.attacker))) and not g.paused
+	for pad in double_touch:pad.visible=g.is_double() and (g.phase=="record" or (g.phase=="play" and (g.practice or g.slot!=g.attacker))) and not g.paused
 	emotes.visible=not g.practice and not g.opponent_left and g.phase in ["room","waiting","result"]
 	emotes.position.y=590 if g.phase=="result" else 124
 	var playing: bool=g.phase=="play" and not g.paused
@@ -317,6 +334,7 @@ func sync() -> void:
 	energy.add_theme_color_override("font_color",Color("ff719b") if g.energy<30 else Color("b8a3ff"))
 	activity.text="공격 준비   %d / 8"%int(g.activity_units)
 	toast.visible=g.now()<g.emote_until
+	toast_panel.visible=toast.visible
 	toast.text=g.emote_text
 	if g.phase in ["review","preview"]:
 		g.result.visible=true
@@ -327,11 +345,11 @@ func sync() -> void:
 		ui.tips.visible=false
 		g.result.position.y=250
 	if g.phase=="play":
-		ui.tips.text="%s  리듬 입력   ·   %s"%[str(g.preferences.values.key),"ESC 잠시 멈춤" if g.practice else "타이밍을 맞춰 연속 콤보!"]
+		ui.tips.text="%s  리듬 입력   ·   %s"%[("F 위 / J 아래" if g.is_double() else str(g.preferences.values.key)),"ESC 잠시 멈춤" if g.practice else "타이밍을 맞춰 연속 콤보!"]
 	elif g.phase=="record":
-		ui.tips.text="%s  리듬 입력   ·   8개를 채운 뒤 미리듣기로 확인해봐"%str(g.preferences.values.key)
+		ui.tips.text="%s  리듬 입력   ·   8개를 채운 뒤 미리듣기로 확인해봐"%("F 위 / J 아래" if g.is_double() else str(g.preferences.values.key))
 	if g.phase=="play" and not g.map_id.is_empty():ui.role.text="MAP / %s  ·  %s"%["PRACTICE" if g.map_training else "CHALLENGE",str(g.Maps.find(g.map_id).skill)]
-	ui.key_hint.text=str(g.preferences.values.key)
+	ui.key_hint.text="" if g.is_double() else str(g.preferences.values.key)
 	ui.key_hint.position.y=566
 	if g.phase=="play" and not mine: ui.key_hint.hide()
 	var report_ready: bool=g.phase=="result" and not g.last_report.is_empty()
@@ -419,7 +437,7 @@ func apply_stage_theme(active: bool) -> void:
 	theme_ready=true
 	theme_stage_last=active
 	if stage_styles.is_empty():
-		stage_styles={"normal":ui.style(Color("28233f"),Color("715a95")),"hover":ui.style(Color("40305d"),Color("b691ff")),"pressed":ui.style(Color("614278"),Color("c29dff")),"disabled":ui.style(Color("242236"),Color("3c354e")),"primary":ui.style(Color("6fffe0"),Color("c0fff1"))}
+		stage_styles={"normal":ui.style(Color("15233b"),Color("344e70")),"hover":ui.style(Color("213e5a"),Color("8bdcff")),"pressed":ui.style(Color("334d73"),Color("b99cff")),"disabled":ui.style(Color("121c2d"),Color("2c3b50")),"primary":ui.style(Color("68ffe0"),Color("c0fff1")),"primary_hover":ui.style(Color("9affec"),Color("d6fff5")),"primary_pressed":ui.style(Color("52cbb4"),Color("93fff0"))}
 		light_styles=stage_styles
 	for nav in g.get_tree().get_nodes_in_group("perfecto_menu_nav"):
 		if g.is_ancestor_of(nav): nav.visible=not active
@@ -427,9 +445,10 @@ func apply_stage_theme(active: bool) -> void:
 		if not g.is_ancestor_of(button): continue
 		var styles: Dictionary=stage_styles if active else light_styles
 		button.add_theme_stylebox_override("normal",styles.primary if button.get_meta("primary",false) else styles.normal)
-		for state in ["hover","pressed","disabled"]: button.add_theme_stylebox_override(state,styles[state])
+		for state in ["hover","pressed","disabled"]: button.add_theme_stylebox_override(state,styles["primary_"+state] if button.get_meta("primary",false) and state in ["hover","pressed"] else styles[state])
 		button.add_theme_color_override("font_color",Color("152c32") if button.get_meta("primary",false) else ui.INK)
-		button.add_theme_color_override("font_hover_color",Color("f6eaff") if active else ui.INK)
+		button.add_theme_color_override("font_hover_color",Color("152c32") if button.get_meta("primary",false) else ui.INK)
+		button.add_theme_color_override("font_pressed_color",Color("152c32") if button.get_meta("primary",false) else ui.INK)
 		button.add_theme_color_override("font_disabled_color",Color("77718b") if active else ui.MUTED)
 	ui.main_exit.text="나가기" if active else "메인으로"
 	ui.main_exit.position=Vector2(978,24) if active else Vector2(964,642)

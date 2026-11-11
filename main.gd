@@ -8,6 +8,8 @@ static var shared_theme: Theme
 const Scoring = preload("res://gameplay/scoring.gd")
 const Challenges = preload("res://gameplay/challenges.gd")
 const Maps = preload("res://gameplay/maps.gd")
+var double_practice:=false
+var double_beat = preload("res://gameplay/double_beat.gd").new(self)
 var map_id:=""
 var map_training:=false
 var map_guide:=false
@@ -54,6 +56,8 @@ var rematch_votes: Array = []
 var opponent_left := false
 var socket := WebSocketPeer.new()
 var connected := false
+var copy_success: JavaScriptObject
+var copy_failure: JavaScriptObject
 var pending := ""
 var slot := 0
 var attacker := 0
@@ -117,8 +121,8 @@ func _ready() -> void:
 		var korean_theme := Theme.new()
 		var korean_font := FontVariation.new()
 		korean_font.base_font = load("res://assets/NotoSansKR.ttf")
-		korean_font.variation_opentype = {"wght":450.0}
-		korean_font.variation_embolden = 0.7
+		korean_font.variation_opentype = {TextServerManager.get_primary_interface().name_to_tag("wght"):500.0}
+		korean_font.variation_embolden = 0.2
 		korean_theme.default_font = korean_font
 		shared_theme = korean_theme
 	if shared_theme: theme=shared_theme
@@ -194,6 +198,8 @@ func account_action(action: String, name_value := "", password_value := "") -> v
 	queue_request({"type":action,"name":name_value,"password":password_value})
 
 func open_menu(destination: String) -> void:
+	double_practice=false
+	double_beat.reset()
 	if not map_id.is_empty() and interface.gameplay_ui.map_ui: interface.gameplay_ui.map_ui.selected=map_id
 	map_id=""
 	if not practice and phase!="lobby": send_packet({"type":"leave"})
@@ -211,7 +217,8 @@ func configure_room(config: Dictionary) -> void:
 	room_settings = config
 	if phase=="room" and slot==0: send_packet({"type":"configure","settings":room_settings})
 
-func start_practice() -> void:
+func start_practice(double_mode := false) -> void:
+	double_practice=double_mode
 	map_id=""
 	practice = true
 	solo_id = ""
@@ -225,6 +232,7 @@ func start_practice() -> void:
 	status.text = "프리스타일 연습   ·   %.2fx"%speed
 
 func begin_record() -> void:
+	double_beat.reset()
 	map_id=""
 	phase = "record"
 	stage_deadline=INF if practice else minf(now()+45,turn_started_client+150)
@@ -244,7 +252,7 @@ func begin_record() -> void:
 	origin = -1
 	next_button.hide()
 	result.add_theme_color_override("font_color",Color("f1edff"))
-	result.text = "%s로 리듬을 만드세요"%str(preferences.values.key)
+	result.text = "F 위 / J 아래 · 두 줄로 만들어봐" if is_double() else "%s로 리듬을 만드세요"%str(preferences.values.key)
 	hint.text = "첫 입력부터 녹음 · 8개를 채우고 미리듣기 · 전송 · 최대 30초"
 
 func receive(m: Dictionary) -> void:
@@ -369,6 +377,7 @@ func update_scores(scores: Array) -> void:
 
 func _notification(what: int) -> void:
 	if what!=NOTIFICATION_APPLICATION_FOCUS_OUT: return
+	if is_double(): double_beat.release_all()
 	if key_held and phase=="record": finish_record_note()
 	elif key_held and phase=="play" and (practice or slot!=attacker): release_hit(input_time())
 	if practice and phase=="play" and not paused: toggle_pause()
@@ -383,6 +392,7 @@ func input_time() -> float:
 	return (now()-origin+float(preferences.values.offset_ms)/1000.0)*speed
 
 func begin_play() -> void:
+	double_beat.reset()
 	phase = "play"
 	origin = now() + 4.0
 	down = -1
@@ -402,7 +412,7 @@ func begin_play() -> void:
 	last_report.clear()
 	result.text = "READY"
 	result.add_theme_color_override("font_color",Color("f1edff"))
-	hint.text = "판정선에 맞춰 %s · 롱 노트는 끝까지 유지"%str(preferences.values.key)
+	hint.text = "F 위 / J 아래 · 동시 입력 가능 · 홀드는 끝까지 유지" if is_double() else "판정선에 맞춰 %s · 롱 노트는 끝까지 유지"%str(preferences.values.key)
 
 func toggle_fullscreen() -> void:
 	if OS.has_feature("web"):
@@ -418,6 +428,7 @@ func pointer_input(pressed: bool) -> void:
 
 func _input(event: InputEvent) -> void:
 	if not event is InputEventKey or event.echo: return
+	if phase=="lobby" and interface and interface.gameplay_ui and interface.gameplay_ui.map_ui.handle_input(event):return
 	if event.pressed and event.keycode==KEY_ESCAPE and practice and phase=="play":
 		toggle_pause()
 		return
@@ -430,6 +441,9 @@ func _input(event: InputEvent) -> void:
 		elif event.keycode==KEY_P: preview_pattern()
 		return
 	if paused: return
+	if is_double():
+		double_beat.input(event)
+		return
 	var selected_key: int = {"SPACE":KEY_SPACE,"D":KEY_D,"F":KEY_F,"J":KEY_J,"K":KEY_K}.get(preferences.values.key,KEY_SPACE)
 	if event.keycode!=selected_key: return
 	if phase=="record" and slot==attacker:
@@ -545,11 +559,11 @@ func register_judgment(index: int, error: float, signed_offset = null) -> void:
 			effects.combo_pop(combo)
 	if not practice: send_packet({"type":"progress","combo":combo,"resolved":live_judgments.size()})
 
-func judge_tap(t: float) -> void:
+func judge_tap(t: float, lane := 0) -> void:
 	var best := -1
 	var error := 0.180001
 	for i in range(notes.size()):
-		if resolved.has(i): continue
+		if resolved.has(i) or int(notes[i].get("lane",0))!=lane: continue
 		var difference := absf(t-float(notes[i].t))
 		if difference<=error:
 			error=difference
@@ -585,7 +599,7 @@ func judge_hold(t: float, d: float) -> void:
 	register_judgment(index,maxf(absf(start_error),absf(release_error)),release_error if absf(release_error)>absf(start_error) else start_error)
 
 func open_library() -> void:
-	if phase=="record" and (used>0 or key_held): return
+	if phase=="record" and (used>0 or key_held or double_beat.held[0] or double_beat.held[1]): return
 	library_return_phase=phase
 	if phase=="record": phase="library"
 	else: interface.page="library"
@@ -602,7 +616,13 @@ func use_saved_pattern(index: int) -> void:
 		slot=0
 		attacker=0
 		speed=float(room_settings.speed)
-	notes=preferences.patterns[index].notes.duplicate(true)
+	var saved: Array=preferences.patterns[index].notes
+	var saved_double: bool=saved.any(func(n):return n.has("lane"))
+	if not practice and saved_double!=is_double():
+		emote_text="현재 모드와 같은 줄 수의 리듬을 선택해 주세요.";emote_until=now()+3;return
+	if practice:double_practice=saved_double
+	double_beat.reset()
+	notes=saved.duplicate(true)
 	used=8
 	down=-1
 	key_held=false
@@ -622,6 +642,7 @@ func save_current_pattern() -> void:
 	emote_until=now()+4
 
 func start_challenge(id: String) -> void:
+	double_practice=false
 	map_id=""
 	practice=true
 	solo_id=id
@@ -681,7 +702,7 @@ func finish_local_round() -> void:
 
 func toggle_pause() -> void:
 	if not practice or phase!="play": return
-	if key_held:
+	if key_held or (is_double() and (double_beat.held[0] or double_beat.held[1])):
 		hint.text="키를 뗀 후 잠시 멈출 수 있어요."
 		return
 	if not paused:
@@ -732,6 +753,7 @@ func _process(delta: float) -> void:
 		if not practice or phase=="lobby": status.text = "연결이 종료되었습니다. 다시 접속해 주세요."
 	judgment_age += delta
 	if not paused:
+		if is_double(): double_beat.update()
 		if phase=="record" and origin>=0 and slot==attacker:
 			if key_held:
 				var elapsed := minf(now()-origin-down,8-used)
@@ -755,7 +777,7 @@ func _process(delta: float) -> void:
 				if float(current.d)>=0.3 and preview_t<float(current.t)+float(current.d) and now()-last_hold_sound>0.18:
 					last_hold_sound=now()
 					sounds.play("hold",0.12)
-			if preview_t>float(notes[-1].t)+float(notes[-1].d)+0.5:
+			if preview_t>pattern_end()+0.5:
 				phase="review"
 				result.text="이 비트로 공격할까?"
 				hint.text="ENTER 전송   ·   R 다시 만들기   ·   P 다시 듣기"
@@ -785,10 +807,12 @@ func _process(delta: float) -> void:
 					resolved[i]=true
 					if practice or slot!=attacker: register_judgment(i,INF)
 			if solo_id=="survival" and energy<=0:
-				if key_held: release_hit(input_time())
+				if is_double(): double_beat.release_all()
+				elif key_held: release_hit(input_time())
 				finish_local_round()
-			elif t>float(notes[-1].t)+float(notes[-1].d)+0.5+absf(float(preferences.values.offset_ms))/1000*speed:
-				if key_held: release_hit(input_time())
+			elif t>pattern_end()+0.5+absf(float(preferences.values.offset_ms))/1000*speed:
+				if is_double(): double_beat.release_all()
+				elif key_held: release_hit(input_time())
 				if practice: finish_local_round()
 				else:
 					phase="result"
@@ -807,6 +831,10 @@ func _draw() -> void:
 			draw_circle(Vector2(245+i*95,y),16,Color("ff715c") if i<activity_units else Color("e5ded8"))
 		return
 	if not phase in ["record","play","preview","review"]: return
+	if is_double():
+		double_beat.draw()
+		stage.draw_progress()
+		return
 	if pad_style==null: pad_style=StyleBoxFlat.new()
 	var key_style: StyleBoxFlat=pad_style
 	key_style.bg_color = Color("214a50") if key_held else Color("28233f")
@@ -893,6 +921,7 @@ func panel_style() -> StyleBoxFlat:
 
 
 func start_map(id: String, training := false, rate := 1.0, guide := false) -> void:
+	double_practice=false
 	var data:=Maps.find(id)
 	if data.is_empty() or (not training and not Maps.unlocked(id,preferences.records)):return
 	practice=true
@@ -943,3 +972,41 @@ func next_map() -> void:
 	if phase!="result" or map_id.is_empty():return
 	var id:=Maps.next_id(map_id)
 	if not id.is_empty():start_map(id,map_training,speed,map_guide)
+
+
+func copy_room_code() -> void:
+	var code_value: String=interface.room_code
+	if code_value.is_empty():return
+	if OS.has_feature("web"):
+		var nav=JavaScriptBridge.get_interface("navigator")
+		if nav.clipboard==null:
+			clipboard_result([],false)
+			return
+		if copy_success==null:
+			copy_success=JavaScriptBridge.create_callback(clipboard_result.bind(true))
+			copy_failure=JavaScriptBridge.create_callback(clipboard_result.bind(false))
+		nav.clipboard.writeText(code_value).then(copy_success).catch(copy_failure)
+	else:
+		DisplayServer.clipboard_set(code_value)
+		clipboard_result([],true)
+
+func clipboard_result(_args: Array, succeeded: bool) -> void:
+	if succeeded:
+		interface.room_view.copied_until=now()+2.5
+		emote_text="방 코드를 복사했어요. 친구에게 보내줘!"
+	else:emote_text="자동 복사를 사용할 수 없어요. 화면의 방 코드를 직접 입력해 주세요."
+	emote_until=now()+3
+
+func is_double() -> bool:
+	return double_practice if practice else room_settings.mode=="double"
+
+func pattern_end() -> float:
+	var end:=0.0
+	for n in notes:end=maxf(end,float(n.t)+float(n.d))
+	return end
+
+func start_double_training() -> void:
+	start_practice(true)
+	notes=[{"t":0.0,"d":0.0,"lane":0},{"t":0.5,"d":0.0,"lane":1},{"t":1.0,"d":0.0,"lane":0},{"t":1.0,"d":0.0,"lane":1},{"t":1.75,"d":1.0,"lane":0},{"t":2.0,"d":0.0,"lane":1},{"t":2.5,"d":0.0,"lane":1},{"t":3.25,"d":0.0,"lane":0}]
+	begin_play()
+	status.text="DOUBLE BEAT · F 위 / J 아래 · 교차·동시·홀드 연습"

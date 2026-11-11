@@ -104,3 +104,9 @@ godot --headless --path . --script res://tests/scene_lifecycle.gd
 ## 크레딧
 
 [Godot Engine](https://godotengine.org/license/) · [Noto Sans KR / SIL OFL](https://github.com/google/fonts/tree/main/ofl/notosanskr). Web 배포물에 글꼴 라이선스를 포함합니다. 일러스트·아이콘·프로그램 합성 사운드를 프로젝트에 포함했습니다.
+
+
+### 더블 비트 모드
+방 만들기 → 모드에서 **더블 비트**를 선택하세요. 위 줄은 **F**, 아래 줄은 **J**로 입력합니다. 양쪽 키를 동시에 누르거나 한 줄을 길게 누른 채 다른 줄을 칠 수 있습니다. 공격·수비 모두 같은 줄을 눌러야 판정되며, 두 줄을 합쳐 기본 예산은 8개(홀드 초당 1개)입니다. 기존 한 줄 모드와 기록은 유지됩니다.
+
+혼자하기 화면의 **더블 비트 F / J**는 교차·동시·홀드 연습용 예제입니다. 아케이드의 직접 비트 만들기는 기존 한 줄 방식이고, 더블 리듬 제작은 더블 대전에서 사용할 수 있습니다.

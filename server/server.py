@@ -44,22 +44,26 @@ async def serve_game(connection, request):
     if gzip_enabled: response.headers['Content-Encoding']='gzip'
     return response
 
-def validate(notes):
+def validate(notes, lanes=1):
     if not isinstance(notes, list) or not 1 <= len(notes) <= 8: raise ValueError('노트 개수 오류')
-    clean=[]; end=-0.08; budget=0
+    clean=[]; ends=[-0.08]*lanes; budget=0
     for n in notes:
-        t=float(n['t']); d=float(n['d'])
-        if not math.isfinite(t+d) or t<0 or t>30 or d<0 or d>8 or t<end+0.075: raise ValueError('잘못된 리듬')
+        if not isinstance(n,dict): raise ValueError('잘못된 노트')
+        t=float(n['t']); d=float(n['d']); lane=n.get('lane',0)
+        if type(lane) is not int or not 0<=lane<lanes: raise ValueError('잘못된 레인')
+        if not math.isfinite(t+d) or t<0 or t>30 or d<0 or d>8 or t<ends[lane]+0.075: raise ValueError('잘못된 리듬')
         budget+=max(1, math.ceil(d)) if d>=0.3 else 1
-        end=t+d; clean.append({'t':t,'d':d if d>=0.3 else 0.0})
+        ends[lane]=t+d; clean.append({'t':t,'d':d if d>=0.3 else 0.0,**({'lane':lane} if lanes==2 else {})})
     if budget!=8: raise ValueError('8개를 모두 사용하세요')
-    return clean
+    return sorted(clean,key=lambda n:n['t'])
+
+def pattern_end(notes): return max(n['t']+n['d'] for n in notes)
 
 from scoring import score, analyze
 
 store = Store.from_env()
 auth_attempts = {}
-MODES = {'casual':'일반전','rush':'스피드전','ranked':'랭크전 β'}
+MODES = {'casual':'일반전','rush':'스피드전','ranked':'랭크전 β','double':'더블 비트'}
 
 def settings(data=None):
     data=data or {}
@@ -162,7 +166,7 @@ async def handle(ws):
                         if len(r['players'])!=2: raise ValueError('친구가 참가하면 시작할 수 있습니다')
                         await turn(r)
                     elif typ=='draft' and r['phase']=='record' and slot==attacker:
-                        r['draft']=validate(m['notes']); r['phase']='review'
+                        r['draft']=validate(m['notes'],2 if r['settings']['mode']=='double' else 1); r['phase']='review'
                         r['deadline']=min(time.monotonic()+90,r['turn_started']+150)
                         await send(ws,type='draft_ready',remaining=max(0,r['deadline']-time.monotonic()))
                         await send(r['players'][1-slot],type='activity',units=8,review=True)
@@ -178,7 +182,7 @@ async def handle(ws):
                             await send(r['players'][1-slot],type='activity',units=units,review=False)
                     elif typ=='confirm' and r['phase']=='review' and slot==attacker:
                         r['notes']=r.pop('draft'); r['phase']='play'; speed=turn_speed(r)
-                        r['deadline']=time.monotonic()+4+(r['notes'][-1]['t']+r['notes'][-1]['d'])/speed+5
+                        r['deadline']=time.monotonic()+4+pattern_end(r['notes'])/speed+5
                         await broadcast(r,type='pattern',notes=r['notes'],speed=speed)
                     elif typ=='progress' and r['phase']=='play' and slot!=attacker:
                         combo=m.get('combo',0); units=m.get('resolved',0)
@@ -200,9 +204,9 @@ async def handle(ws):
                             r.update(id=uuid.uuid4().hex,turn=0,scores=[0,0],awarded=False,rematch=[],first_attacker=1-r.get('first_attacker',0))
                             await turn(r)
                     elif typ=='pattern' and r['phase']=='record' and slot==attacker:
-                        r['notes']=validate(m['notes']); r['phase']='play'
+                        r['notes']=validate(m['notes'],2 if r['settings']['mode']=='double' else 1); r['phase']='play'
                         speed=turn_speed(r)
-                        r['deadline']=time.monotonic()+4+(r['notes'][-1]['t']+r['notes'][-1]['d'])/speed+5
+                        r['deadline']=time.monotonic()+4+pattern_end(r['notes'])/speed+5
                         await broadcast(r,type='pattern',notes=r['notes'],speed=speed)
                     elif typ=='result' and r['phase']=='play' and slot!=attacker:
                         if time.monotonic()<r['deadline']-5.3: raise ValueError('아직 연주 중입니다')
