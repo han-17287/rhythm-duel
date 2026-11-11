@@ -4,6 +4,7 @@ var g: Control
 var ui_ref: WeakRef
 var ui: RefCounted:
 	get: return ui_ref.get_ref()
+var map_ui: RefCounted
 var course_page: Control
 var settings_page: Control
 var library_page: Control
@@ -66,6 +67,8 @@ func _init(game: Control, base_ui: RefCounted) -> void:
 	ui_ref=weakref(base_ui)
 
 func build() -> void:
+	map_ui=preload("res://gameplay/map_interface.gd").new(g,ui)
+	map_ui.build()
 	ui.button(g,"전체 화면",Rect2(200,24,168,44),g.toggle_fullscreen)
 	ui.button(g,"설정",Rect2(385,24,120,44),func():
 		if g.phase=="lobby": ui.page="settings")
@@ -91,7 +94,7 @@ func build() -> void:
 	activity=ui.text(g,"",50,322,18,ui.PURPLE)
 	toast=ui.text(g,"",50,666,15,ui.PURPLE)
 	course_page=ui.group()
-	ui.text(course_page,"한 곡 더, 한 단계 더.",50,166,35)
+	ui.text(course_page,"아케이드 코스",50,166,35)
 	ui.button(course_page,"내 비트 보관함",Rect2(440,166,320,48),g.open_library)
 	ui.button(course_page,"직접 비트 만들기  →",Rect2(780,166,324,48),g.start_practice)
 	var courses: Array = g.Challenges.courses()
@@ -263,11 +266,12 @@ func reset_settings() -> void:
 
 func sync() -> void:
 	apply_stage_theme(g.stage.active())
+	map_ui.sync()
 	for nav in g.get_tree().get_nodes_in_group("perfecto_menu_nav"):
 		if g.is_ancestor_of(nav) and nav.get_meta("menu_action","")!="전체 화면":nav.disabled=g.phase!="lobby"
 	if g.stage.active() and not g.result.text in g.NAMES: g.result.add_theme_color_override("font_color",Color("f1ecff"))
 	var menu: bool=g.phase=="lobby"
-	ui.reveal(course_page,menu and ui.page=="solo")
+	ui.reveal(course_page,menu and ui.page=="arcade")
 	ui.reveal(settings_page,menu and ui.page=="settings")
 	ui.reveal(library_page,(menu and ui.page=="library") or g.phase=="library")
 	library_empty.visible=g.preferences.patterns.is_empty()
@@ -326,6 +330,7 @@ func sync() -> void:
 		ui.tips.text="%s  리듬 입력   ·   %s"%[str(g.preferences.values.key),"ESC 잠시 멈춤" if g.practice else "타이밍을 맞춰 연속 콤보!"]
 	elif g.phase=="record":
 		ui.tips.text="%s  리듬 입력   ·   8개를 채운 뒤 미리듣기로 확인해봐"%str(g.preferences.values.key)
+	if g.phase=="play" and not g.map_id.is_empty():ui.role.text="MAP / %s  ·  %s"%["PRACTICE" if g.map_training else "CHALLENGE",str(g.Maps.find(g.map_id).skill)]
 	ui.key_hint.text=str(g.preferences.values.key)
 	ui.key_hint.position.y=566
 	if g.phase=="play" and not mine: ui.key_hint.hide()
@@ -333,7 +338,11 @@ func sync() -> void:
 	ui.reveal(summary,report_ready)
 	footer.visible=report_ready
 	replay.visible=report_ready and g.practice
-	advance.visible=report_ready and g.practice and not g.solo_id.is_empty() and not g.match_finished
+	advance.visible=report_ready and g.practice and ((not g.solo_id.is_empty() and not g.match_finished) or (not g.map_id.is_empty() and not g.Maps.next_id(g.map_id).is_empty()))
+	advance.text="다음 맵 연습 →" if not g.map_id.is_empty() and g.map_training else "다음 맵 →" if not g.map_id.is_empty() else "다음 웨이브 →"
+	advance.disabled=not g.map_id.is_empty() and not g.map_training and not g.Maps.unlocked(g.Maps.next_id(g.map_id),g.preferences.records)
+	replay.text="같은 맵 다시 도전" if not g.map_id.is_empty() else "같은 비트 다시 도전"
+	course_back.text="맵 선택" if not g.map_id.is_empty() else "연습실로"
 	course_back.visible=report_ready and g.practice
 	rematch.visible=report_ready and not g.practice and g.match_finished and not g.opponent_left
 	if rematch.visible:
@@ -341,7 +350,7 @@ func sync() -> void:
 		rematch.text="재대전 준비 %d / 2"%g.rematch_votes.size() if not g.rematch_votes.is_empty() else "한 판 더!  →"
 	if report_ready:
 		var r: Dictionary=g.last_report
-		score_caption.text="TOTAL SCORE" if g.practice and not g.solo_id.is_empty() and g.match_finished else "ROUND SCORE"
+		score_caption.text="MAP SCORE" if not g.map_id.is_empty() else "TOTAL SCORE" if g.practice and not g.solo_id.is_empty() and g.match_finished else "ROUND SCORE"
 		g.result.position.y=175
 		g.result.add_theme_font_size_override("font_size",32)
 		g.hint.visible=false
@@ -378,6 +387,11 @@ func sync() -> void:
 		footer.text=g.reward_text if not g.reward_text.is_empty() else ("내 수비 결과" if g.last_report_mine else "상대의 수비 결과")+"   ·   추가 입력 %d회 / -%d점"%[int(r.extra),int(r.extra)*200]
 		if r.has("warning"): footer.text=str(r.warning)
 		if g.practice and g.new_best: footer.text="NEW BEST!  최고 기록을 이 기기에 저장했어요." if g.preferences.persist_ok else "NEW BEST!  브라우저 저장이 차단되어 이번 창에서만 유지돼요."
+		if not g.map_id.is_empty():
+			var stars: int=g.Maps.stars(float(r.accuracy))
+			footer.text="연습 완료 · 배속/가이드 연습은 기록과 해금에 반영하지 않아요." if g.map_training else "★".repeat(stars)+"☆".repeat(3-stars)+"   ·   "+("NEW BEST!  ·  " if g.new_best else "")+("클리어! 다음 맵에 도전해봐." if stars>0 and not g.Maps.next_id(g.map_id).is_empty() else "마지막 맵 완주! 모든 별에 도전해봐." if stars>0 else "정확도 60%부터 클리어 · 느린 연습으로 먼저 익혀봐.")
+			if not g.map_training and not g.preferences.persist_ok:footer.text="저장이 차단되어 기록과 해금은 이번 창에서만 유지돼요."
+
 		ui.reward_shop.visible=not g.practice and g.match_finished
 		ui.reward_shop.position=Vector2(355,590)
 		g.next_button.position=Vector2(50,590)

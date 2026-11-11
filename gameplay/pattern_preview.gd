@@ -10,5 +10,5 @@ func _draw() -> void:
 	for n in notes:
 		var x:=6+float(n.t)*unit
 		var color:=Color("c4a2ff") if float(n.d)>0 else Color("6fffe0")
-		if float(n.d)>0: draw_line(Vector2(x,y),Vector2(x+float(n.d)*unit,y),color,7,true)
-		draw_circle(Vector2(x,y),5,color)
+		if float(n.d)>0: draw_line(Vector2(x,y),Vector2(x+float(n.d)*unit,y),color,3 if notes.size()>8 else 7,true)
+		draw_circle(Vector2(x,y),1.8 if notes.size()>8 else 5,color)

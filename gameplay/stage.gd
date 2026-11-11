@@ -59,9 +59,14 @@ func draw() -> void:
 	var moving: bool=not g.preferences.values.reduced_motion
 	var t: float=g.now() if moving else 0.0
 	var accent: Color=Color("ff86a5") if g.phase in ["record","review"] else Color("66ffe3")
+	var glow_key: String="coral" if g.phase in ["record","review"] else "cyan"
+	if not g.map_id.is_empty():
+		var region: int=int(g.Maps.find(g.map_id).region)
+		accent=[Color("66ffe3"),Color("ffd388"),Color("c3a3ff")][region]
+		glow_key=["cyan","coral","violet"][region]
 	g.draw_rect(Rect2(0,0,1152,720),Color("101124"))
 	g.draw_texture_rect(glows.violet,Rect2(480+sin(t*.25)*30,-160,900,900),false)
-	g.draw_texture_rect(glows.coral if g.phase in ["record","review"] else glows.cyan,Rect2(-220,100,800,800),false)
+	g.draw_texture_rect(glows[glow_key],Rect2(-220,100,800,800),false)
 	g.draw_colored_polygon(PackedVector2Array([Vector2(110,-20),Vector2(650+sin(t*.3)*40,720),Vector2(180,720)]),Color(accent,.025))
 	g.draw_colored_polygon(PackedVector2Array([Vector2(1040,-20),Vector2(470,720),Vector2(980,720)]),Color("aa8aff")*Color(1,1,1,.035))
 	# A moving stage floor adds depth while keeping the timing gate perfectly stationary.
@@ -78,11 +83,16 @@ func draw() -> void:
 	g.draw_line(Vector2(48,92),Vector2(210,92),accent,3,true)
 	var captions: Dictionary={"record":"CREATE YOUR BEAT","review":"CHECK & SEND","preview":"LISTEN TO YOUR BEAT","play":"ECHO THE RHYTHM","waiting":"OPPONENT IS CREATING","result":"BATTLE REPORT"}
 	var caption: String=captions.get(g.phase,"")
+	if not g.map_id.is_empty():caption="MAP "+g.map_id.substr(1)+(" / PRACTICE" if g.map_training else " / RHYTHM JOURNEY")
 	g.draw_circle(Vector2(430,47),3,Color(accent,.7+(.25*sin(t*4) if moving else 0)))
 	g.draw_string(ThemeDB.fallback_font,Vector2(445,53),caption,HORIZONTAL_ALIGNMENT_LEFT,-1,14,Color("a99bbe"))
 	var steps:=0
 	var current:=0
-	if not g.practice:
+	if not g.map_id.is_empty():
+		var data: Dictionary=g.Maps.find(g.map_id)
+		steps=4
+		current=mini(3,int(maxf(0,g.input_time())/(float(data.bars)*60.0/float(data.bpm))))
+	elif not g.practice:
 		steps=int(g.room_settings.rounds)*2
 		current=g.turn_index
 	elif not g.solo_id.is_empty() and g.solo_id!="survival":

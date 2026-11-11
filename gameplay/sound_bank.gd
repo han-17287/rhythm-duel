@@ -18,6 +18,9 @@ func _ready() -> void:
 		streams["miss"] = tone(110,0.09,2)
 		streams["perfect"] = tone(1046.5,0.065,0)
 		streams["hold"] = tone(392,0.045,0)
+		streams["kick"] = tone(75,.11,2)
+		streams["hat"] = tone(6200,.025,1)
+		for i in range(4):streams["bass%d"%i]=tone([65.41,73.42,87.31,98.0][i],.22,0)
 		shared_streams=streams
 	else:
 		streams=shared_streams
@@ -61,3 +64,10 @@ func fanfare() -> void:
 	for i in [0,2,3,5]:
 		t.tween_callback(note.bind(i))
 		t.tween_interval(0.09)
+
+
+func backing(step: int, region: int) -> void:
+	play("hat",.08)
+	if step%2==0:play("kick",.25)
+	if step%4==2:play("tick",.09)
+	if step%4==0:play("bass%d"%posmod(step/8+region,4),.28)

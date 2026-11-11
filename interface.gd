@@ -184,7 +184,7 @@ func build() -> void:
 	budget = text(g,"",50,321,15,MINT)
 	key_hint = text(g,"SPACE",932,555,19,INK)
 	tips = text(g,"SPACE  리듬 입력     ·     TAP  짧게 누르기     ·     HOLD  끝까지 유지",50,630,16,MUTED)
-	main_exit=button(g,"메인으로",Rect2(964,642,140,44),func(): g.open_menu("home"))
+	main_exit=button(g,"메인으로",Rect2(964,642,140,44),func(): g.open_menu("solo" if not g.map_id.is_empty() else "home"))
 	g.next_button = button(g,"다음 공수 시작  →",Rect2(50,455,280,64),func():
 		if g.practice: g.start_practice()
 		else: g.send_packet({"type":"next"})
@@ -198,7 +198,7 @@ func build() -> void:
 	text(home,"리듬을 던져.\n완벽하게 받아쳐.",46,184,54)
 	text(home,"네 손끝에서 시작되는 리듬 배틀.\n8개의 비트를 만들고, 친구의 한 수를 받아쳐!",50,355,19,MUTED)
 	button(home,"친구와 대전  →",Rect2(50,462,300,66),func(): page="rooms",true)
-	g.practice_button = button(home,"혼자 도전",Rect2(370,462,210,66),func(): page="solo")
+	g.practice_button = button(home,"혼자하기 · 맵",Rect2(370,462,210,66),func(): page="solo")
 	profile_summary = text(home,"게스트로 바로 플레이할 수 있어요.",50,565,17,MUTED)
 	var illustration := preload("res://art.gd").new()
 	illustration.position = Vector2(658,133)

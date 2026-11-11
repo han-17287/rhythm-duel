@@ -7,6 +7,12 @@ static var shared_theme: Theme
 
 const Scoring = preload("res://gameplay/scoring.gd")
 const Challenges = preload("res://gameplay/challenges.gd")
+const Maps = preload("res://gameplay/maps.gd")
+var map_id:=""
+var map_training:=false
+var map_guide:=false
+var map_tick:=-1
+var map_guide_index:=0
 const NoteSkin = preload("res://gameplay/note_skin.gd")
 var lane_style: StyleBoxFlat
 var pad_style: StyleBoxFlat
@@ -188,6 +194,8 @@ func account_action(action: String, name_value := "", password_value := "") -> v
 	queue_request({"type":action,"name":name_value,"password":password_value})
 
 func open_menu(destination: String) -> void:
+	if not map_id.is_empty() and interface.gameplay_ui.map_ui: interface.gameplay_ui.map_ui.selected=map_id
+	map_id=""
 	if not practice and phase!="lobby": send_packet({"type":"leave"})
 	phase = "lobby"
 	down = -1
@@ -204,6 +212,7 @@ func configure_room(config: Dictionary) -> void:
 	if phase=="room" and slot==0: send_packet({"type":"configure","settings":room_settings})
 
 func start_practice() -> void:
+	map_id=""
 	practice = true
 	solo_id = ""
 	solo_reports.clear()
@@ -216,6 +225,7 @@ func start_practice() -> void:
 	status.text = "프리스타일 연습   ·   %.2fx"%speed
 
 func begin_record() -> void:
+	map_id=""
 	phase = "record"
 	stage_deadline=INF if practice else minf(now()+45,turn_started_client+150)
 	key_held = false
@@ -612,6 +622,7 @@ func save_current_pattern() -> void:
 	emote_until=now()+4
 
 func start_challenge(id: String) -> void:
+	map_id=""
 	practice=true
 	solo_id=id
 	solo_wave=0
@@ -632,11 +643,17 @@ func start_solo_wave() -> void:
 	status.text="%s   ·   WAVE %d%s   ·   %.2fx"%[str(course.name),solo_wave+1,"" if solo_id=="survival" else " / 3",speed]
 
 func next_solo_wave() -> void:
+	if not map_id.is_empty():
+		next_map()
+		return
 	if phase!="result" or solo_id.is_empty() or match_finished: return
 	solo_wave+=1
 	start_solo_wave()
 
 func finish_local_round() -> void:
+	if not map_id.is_empty():
+		finish_map()
+		return
 	last_report=Scoring.analyze(notes,hits)
 	last_report_mine=true
 	phase="result"
@@ -676,6 +693,9 @@ func toggle_pause() -> void:
 
 func replay_last() -> void:
 	if not practice or phase!="result": return
+	if not map_id.is_empty():
+		start_map(map_id,map_training,speed,map_guide)
+		return
 	if not solo_id.is_empty():
 		start_challenge(solo_id)
 	else: begin_play()
@@ -741,6 +761,7 @@ func _process(delta: float) -> void:
 				hint.text="ENTER 전송   ·   R 다시 만들기   ·   P 다시 듣기"
 		elif phase=="play":
 			var t := (now()-origin)*speed
+			if not map_id.is_empty(): update_map_audio(t)
 			if t<0:
 				var tick := ceili(-t/speed)
 				if combo==0: result.text="READY  %d"%tick
@@ -869,3 +890,56 @@ func panel_style() -> StyleBoxFlat:
 	s.corner_radius_bottom_right = 16
 	lane_style=s
 	return s
+
+
+func start_map(id: String, training := false, rate := 1.0, guide := false) -> void:
+	var data:=Maps.find(id)
+	if data.is_empty() or (not training and not Maps.unlocked(id,preferences.records)):return
+	practice=true
+	map_id=id
+	map_training=training
+	map_guide=training and guide
+	solo_id=""
+	solo_reports.clear()
+	new_best=false
+	reward_text=""
+	slot=0
+	attacker=0
+	speed=clampf(rate,.5,1.25) if training else 1.0
+	notes=Maps.chart(id).duplicate(true)
+	map_tick=-1
+	map_guide_index=0
+	begin_play()
+	match_finished=false
+	status.text="MAP %s  ·  %s  ·  %d BPM  ·  %.2fx%s"%[id.substr(1),str(data.name),int(data.bpm),speed,"  ·  연습" if training else ""]
+
+func update_map_audio(t: float) -> void:
+	if t<0:return
+	var data:=Maps.find(map_id)
+	var tick:=int(t/(60.0/float(data.bpm)*.5))
+	if tick!=map_tick:
+		map_tick=tick
+		sounds.backing(tick,int(data.region))
+	if map_guide:
+		while map_guide_index<notes.size() and t>=float(notes[map_guide_index].t):
+			sounds.play("note%d"%posmod(map_guide_index,8),.25)
+			map_guide_index+=1
+
+func finish_map() -> void:
+	last_report=Scoring.analyze(notes,hits)
+	last_report_mine=true
+	phase="result"
+	match_finished=true
+	var cleared:=float(last_report.accuracy)>=60
+	if not map_training:new_best=preferences.remember(Maps.record_id(map_id),last_report)
+	result.text="연습 완료!" if map_training else "맵 클리어!" if cleared else "한 번 더 도전해볼까?"
+	result.add_theme_color_override("font_color",Color("f1edff"))
+	next_button.hide()
+	if cleared:
+		sounds.fanfare()
+		effects.confetti()
+
+func next_map() -> void:
+	if phase!="result" or map_id.is_empty():return
+	var id:=Maps.next_id(map_id)
+	if not id.is_empty():start_map(id,map_training,speed,map_guide)

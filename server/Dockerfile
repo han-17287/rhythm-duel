@@ -4,7 +4,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates libfontconfig1 libx11-6 libxcursor1 libxinerama1 \
     libxrandr2 libxi6 libgl1 libasound2 libpulse0 libudev1 \
     && rm -rf /var/lib/apt/lists/*
-ADD https://codeload.github.com/han-17287/rhythm-duel/zip/refs/heads/main /tmp/game.zip
+# Bump this revision for client-only releases under Render rootDir=server.
+ARG CLIENT_REVISION=solo-maps-v1
+ADD https://codeload.github.com/han-17287/rhythm-duel/zip/refs/heads/main?revision=${CLIENT_REVISION} /tmp/game.zip
 RUN python -m zipfile -e /tmp/game.zip /src
 WORKDIR /src/rhythm-duel-main
 RUN python tools/build_web.py
