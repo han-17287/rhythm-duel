@@ -1,4 +1,4 @@
-"""Bound Godot 4.6.3's Emscripten GL object-name tables during long sessions.
+"""Bound Godot 4.7.2's Emscripten GL object-name tables during long sessions.
 
 The upstream bridge uses one ever-increasing counter for all object tables.
 Godot creates/deletes buffers, VAOs, and syncs every frame; their null slots

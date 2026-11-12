@@ -56,8 +56,8 @@ func play(key: String, gain := 1.0) -> void:
 	player.volume_db = linear_to_db(maxf(0.001,volume*gain))
 	player.play()
 
-func note(index: int) -> void:
-	play("note%d"%posmod(index,8))
+func note(index: int, gain := 1.0) -> void:
+	play("note%d"%posmod(index,8),gain)
 
 func fanfare() -> void:
 	var t := create_tween()

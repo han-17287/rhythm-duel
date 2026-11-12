@@ -8,8 +8,23 @@ static var shared_theme: Theme
 const Scoring = preload("res://gameplay/scoring.gd")
 const Challenges = preload("res://gameplay/challenges.gd")
 const Maps = preload("res://gameplay/maps.gd")
+const Story = preload("res://gameplay/story.gd")
+var story_music: Node
 var double_practice:=false
 var double_beat = preload("res://gameplay/double_beat.gd").new(self)
+const Ranker=preload("res://gameplay/ranker.gd")
+var ranker_id:=""
+var ranker_kind:="one"
+var ranker_one_key:=-1
+var ranker_training:=false
+var ranker_seek:=0.0
+var ranker_end:=0.0
+var ranker_session:=""
+var ranker_boards:Dictionary={}
+var ranker_waiting:Dictionary={}
+var ranker_request_at:=0.0
+var ranker_upload_pending:=false
+var ranker_upload_at:=0.0
 var map_id:=""
 var map_training:=false
 var map_guide:=false
@@ -25,6 +40,8 @@ var effects: Node2D
 var key_held := false
 var active_hold := -1
 var live_judgments: Dictionary = {}
+var live_points:=0.0
+var live_possible:=0.0
 var combo := 0
 var max_combo := 0
 var hit_offsets: Array = []
@@ -56,6 +73,7 @@ var rematch_votes: Array = []
 var opponent_left := false
 var socket := WebSocketPeer.new()
 var connected := false
+var web_input: JavaScriptObject
 var copy_success: JavaScriptObject
 var copy_failure: JavaScriptObject
 var pending := ""
@@ -117,10 +135,12 @@ func label_at(text_value: String, pos: Vector2, font_size: int, color := Color.W
 	return l
 
 func _ready() -> void:
-	if shared_theme==null and ResourceLoader.exists("res://assets/NotoSansKR.ttf"):
+	Input.use_accumulated_input=false
+	if OS.has_feature("web"):web_input=JavaScriptBridge.get_interface("PerfectoInput")
+	if shared_theme==null and ResourceLoader.exists("res://assets/PerfectoUI.woff2"):
 		var korean_theme := Theme.new()
 		var korean_font := FontVariation.new()
-		korean_font.base_font = load("res://assets/NotoSansKR.ttf")
+		korean_font.base_font = load("res://assets/PerfectoUI.woff2")
 		korean_font.variation_opentype = {TextServerManager.get_primary_interface().name_to_tag("wght"):500.0}
 		korean_font.variation_embolden = 0.2
 		korean_theme.default_font = korean_font
@@ -132,6 +152,8 @@ func _ready() -> void:
 	if sounds==null:
 		sounds = preload("res://gameplay/sound_bank.gd").new()
 		add_child(sounds)
+	story_music=preload("res://gameplay/story_music.gd").new()
+	add_child(story_music)
 	effects = preload("res://gameplay/particles.gd").new()
 	add_child(effects)
 	apply_preferences()
@@ -145,6 +167,8 @@ func open_transport() -> void:
 	if socket.get_ready_state() in [WebSocketPeer.STATE_OPEN,WebSocketPeer.STATE_CONNECTING]: return
 	connected = false
 	socket = WebSocketPeer.new()
+	socket.outbound_buffer_size=524288
+	socket.inbound_buffer_size=524288
 	var err := socket.connect_to_url(endpoint.text.strip_edges())
 	if err != OK:
 		status.text = "서버 주소를 확인하세요"
@@ -198,6 +222,8 @@ func account_action(action: String, name_value := "", password_value := "") -> v
 	queue_request({"type":action,"name":name_value,"password":password_value})
 
 func open_menu(destination: String) -> void:
+	ranker_id="";ranker_session="";ranker_waiting.clear()
+	story_music.stop()
 	double_practice=false
 	double_beat.reset()
 	if not map_id.is_empty() and interface.gameplay_ui.map_ui: interface.gameplay_ui.map_ui.selected=map_id
@@ -218,6 +244,7 @@ func configure_room(config: Dictionary) -> void:
 	if phase=="room" and slot==0: send_packet({"type":"configure","settings":room_settings})
 
 func start_practice(double_mode := false) -> void:
+	ranker_id="";ranker_session=""
 	double_practice=double_mode
 	map_id=""
 	practice = true
@@ -232,6 +259,8 @@ func start_practice(double_mode := false) -> void:
 	status.text = "프리스타일 연습   ·   %.2fx"%speed
 
 func begin_record() -> void:
+	if web_input!=null:web_input.clearPointers()
+	story_music.stop()
 	double_beat.reset()
 	map_id=""
 	phase = "record"
@@ -257,6 +286,17 @@ func begin_record() -> void:
 
 func receive(m: Dictionary) -> void:
 	match m.get("type", ""):
+		"ranker_ready":
+			if ranker_waiting.get("id","")==m.id and ranker_waiting.get("kind","")==m.kind and (interface.page=="ranker" or phase=="result"):
+				ranker_session=str(m.session);ranker_waiting.clear();launch_ranker(str(m.id),str(m.kind))
+		"ranker_board":
+			ranker_boards[str(m.id)+":"+str(m.kind)]=m
+		"ranker_result":
+			ranker_upload_pending=false
+			apply_profile(m.profile)
+			reward_text="글로벌 기록 등록 완료"+(" · 첫 클리어 +%d 코인"%int(m.coins) if int(m.coins)>0 else "")
+			emote_text=reward_text;emote_until=now()+5
+			ranker_boards.erase(str(m.id)+":"+str(m.kind))
 		"draft_ready":
 			stage_deadline=now()+float(m.get("remaining",90))
 			if phase=="review": hint.text = "미리듣기로 확인하고 공격을 보내세요."
@@ -340,6 +380,9 @@ func receive(m: Dictionary) -> void:
 				hint.text = "방장이 다음 공수를 시작합니다"
 		"error":
 			status.text = str(m.message)
+			if m.get("action","")=="ranker_begin":ranker_waiting.clear()
+			if m.get("action","")=="ranker_result":
+				ranker_upload_pending=false;reward_text="글로벌 등록 실패 · 로컬 기록은 저장됐어요."
 			if m.get("action","")=="resume":
 				save_session("")
 				apply_profile({})
@@ -380,21 +423,35 @@ func _notification(what: int) -> void:
 	if is_double(): double_beat.release_all()
 	if key_held and phase=="record": finish_record_note()
 	elif key_held and phase=="play" and (practice or slot!=attacker): release_hit(input_time())
-	if practice and phase=="play" and not paused: toggle_pause()
+	if practice and phase=="play" and not paused:
+		if not ranker_id.is_empty() and not ranker_training:
+			ranker_training=true;ranker_session="";status.text+=" · 연습 전환";emote_text="창을 벗어나 연습으로 전환했어요. 정식 기록에는 반영하지 않아요.";emote_until=now()+5
+		toggle_pause()
 
 func apply_preferences() -> void:
 	sounds.volume = float(preferences.values.volume)
+	if story_music:story_music.volume(float(preferences.values.volume),float(preferences.values.music_volume))
 	effects.enabled = bool(preferences.values.effects) and not bool(preferences.values.reduced_motion)
 	for art in get_tree().get_nodes_in_group("perfecto_art"):
 		if is_ancestor_of(art): art.motion_enabled=not bool(preferences.values.reduced_motion)
 
 func input_time() -> float:
-	return (now()-origin+float(preferences.values.offset_ms)/1000.0)*speed
+	return play_time()+float(preferences.values.offset_ms)/1000.0*speed
 
 func begin_play() -> void:
+	if web_input!=null:web_input.clearPointers()
+	ranker_one_key=-1
+	story_music.stop()
+	if not ranker_id.is_empty():
+		var song:=Ranker.find(ranker_id)
+		story_music.prepare(ranker_id,speed,float(song.audio_offset)+ranker_seek,"ranker")
+		story_music.start(maxf(0,story_music.pre_roll-4*60.0/song_bpm()))
+	elif not map_id.is_empty():
+		story_music.prepare(map_id,speed,4*60.0/float(Maps.find(map_id).bpm))
+		story_music.start(0)
 	double_beat.reset()
 	phase = "play"
-	origin = now() + 4.0
+	origin = now() + (4*60.0/song_bpm()/speed if is_song() else 4.0)
 	down = -1
 	key_held = false
 	active_hold = -1
@@ -402,6 +459,7 @@ func begin_play() -> void:
 	hits.clear()
 	resolved.clear()
 	live_judgments.clear()
+	live_points=0;live_possible=0
 	hit_offsets.clear()
 	combo = 0
 	max_combo = 0
@@ -412,7 +470,7 @@ func begin_play() -> void:
 	last_report.clear()
 	result.text = "READY"
 	result.add_theme_color_override("font_color",Color("f1edff"))
-	hint.text = "F 위 / J 아래 · 동시 입력 가능 · 홀드는 끝까지 유지" if is_double() else "판정선에 맞춰 %s · 롱 노트는 끝까지 유지"%str(preferences.values.key)
+	hint.text = "F 위 / J 아래 · 동시 입력 가능 · 홀드는 끝까지 유지" if is_double() else "SPACE / F / J · 한 줄 교차 입력 · 홀드는 끝까지 유지" if not ranker_id.is_empty() else "판정선에 맞춰 %s · 롱 노트는 끝까지 유지"%str(preferences.values.key)
 
 func toggle_fullscreen() -> void:
 	if OS.has_feature("web"):
@@ -424,11 +482,23 @@ func pointer_input(pressed: bool) -> void:
 	var event := InputEventKey.new()
 	event.keycode={"SPACE":KEY_SPACE,"D":KEY_D,"F":KEY_F,"J":KEY_J,"K":KEY_K}.get(preferences.values.key,KEY_SPACE)
 	event.pressed=pressed
+	event.set_meta("pointer",true)
+	event.set_meta("pointer_delay",web_pointer_delay(pressed))
 	_input(event)
 
 func _input(event: InputEvent) -> void:
 	if not event is InputEventKey or event.echo: return
-	if phase=="lobby" and interface and interface.gameplay_ui and interface.gameplay_ui.map_ui.handle_input(event):return
+	if phase in ["record","play"] and event.physical_keycode in [KEY_SPACE,KEY_D,KEY_F,KEY_J,KEY_K]:event.keycode=event.physical_keycode
+	var event_delay:=web_key_delay(event)
+	var event_now:=now()-event_delay
+	if phase in ["record","play"] and (event.ctrl_pressed or event.alt_pressed or event.meta_pressed):return
+	if phase=="lobby" and interface and interface.gameplay_ui:
+		if interface.gameplay_ui.calibration_ui.handle_input(event,event_delay):
+			get_viewport().set_input_as_handled();return
+		if interface.gameplay_ui.ranker_ui.handle_input(event):
+			get_viewport().set_input_as_handled();return
+		if interface.gameplay_ui.map_ui.handle_input(event):
+			get_viewport().set_input_as_handled();return
 	if event.pressed and event.keycode==KEY_ESCAPE and practice and phase=="play":
 		toggle_pause()
 		return
@@ -440,32 +510,39 @@ func _input(event: InputEvent) -> void:
 		elif event.keycode==KEY_R: retry_recording()
 		elif event.keycode==KEY_P: preview_pattern()
 		return
-	if paused: return
+	if event.pressed and event.keycode==KEY_R and practice and phase=="result":replay_last();return
+	if paused:
+		if event.pressed and event.keycode==KEY_R:restart_practice_current()
+		return
 	if is_double():
-		double_beat.input(event)
+		double_beat.input(event,event_delay)
 		return
 	var selected_key: int = {"SPACE":KEY_SPACE,"D":KEY_D,"F":KEY_F,"J":KEY_J,"K":KEY_K}.get(preferences.values.key,KEY_SPACE)
-	if event.keycode!=selected_key: return
+	if event.keycode!=selected_key and not (not ranker_id.is_empty() and ranker_kind=="one" and event.keycode in [KEY_SPACE,KEY_F,KEY_J]): return
 	if phase=="record" and slot==attacker:
 		if event.pressed and not key_held:
-			if not notes.is_empty() and now()-origin<float(notes[-1].t)+float(notes[-1].d)+0.08: return
-			if origin<0: origin=now()
+			if not notes.is_empty() and event_now-origin<float(notes[-1].t)+float(notes[-1].d)+0.08: return
+			if origin<0: origin=event_now
 			key_held = true
-			down = now()-origin
+			down = event_now-origin
 			flash = 1.0
 			feedback_color=skin_color
 			sounds.note(notes.size())
 		elif not event.pressed and key_held:
-			finish_record_note()
+			finish_record_note(event_now)
 	elif phase=="play" and (practice or slot!=attacker):
-		var t := input_time()
+		var t := input_time()-event_delay*speed
+		if not ranker_id.is_empty() and ranker_kind=="one":
+			if event.pressed and key_held and active_hold<0 and event.keycode!=ranker_one_key:release_hit(t)
+			if not event.pressed and event.keycode!=ranker_one_key:return
 		if event.pressed and not key_held:
 			if t < -0.180001: return
+			ranker_one_key=event.keycode
 			key_held = true
 			down = t
 			flash = 1.0
 			feedback_color=CYAN
-			sounds.note(resolved.size())
+			sounds.note(resolved.size(),.23 if is_song() else 1.0)
 			judge_tap(t)
 		elif not event.pressed and key_held:
 			release_hit(t)
@@ -478,8 +555,8 @@ func release_hit(t: float) -> void:
 	down = -1
 	active_hold = -1
 
-func finish_record_note() -> void:
-	var duration := now()-origin-down
+func finish_record_note(at := -1.0) -> void:
+	var duration := (now() if at<0 else at)-origin-down
 	if duration<0.3: duration=0
 	duration = minf(duration,8-used)
 	notes.append({"t":down,"d":duration})
@@ -527,7 +604,7 @@ func retry_recording() -> void:
 	begin_record()
 
 func show_judgment(error: float) -> void:
-	var j := Scoring.judgment(error)
+	var j := Scoring.judgment(error,judge_windows())
 	last_hit_offset=null
 	last_judgment = NAMES[j]
 	feedback_color=[Color("72ffe4"),Color("ffdc88"),Color("c4a6ff"),Color("ff719b")][j]
@@ -543,8 +620,10 @@ func show_judgment(error: float) -> void:
 
 func register_judgment(index: int, error: float, signed_offset = null) -> void:
 	if live_judgments.has(index): return
-	var j := Scoring.judgment(error)
+	var j := Scoring.judgment(error,judge_windows())
 	live_judgments[index]=j
+	var weight:float=maxi(1,ceili(float(notes[index].d)))
+	live_points+=float(Scoring.POINTS[j])*weight;live_possible+=1000*weight
 	combo = 0 if j==3 else combo+1
 	max_combo = maxi(max_combo,combo)
 	if signed_offset!=null: hit_offsets.append(float(signed_offset)*1000)
@@ -553,21 +632,22 @@ func register_judgment(index: int, error: float, signed_offset = null) -> void:
 	last_hit_offset=null if signed_offset==null else float(signed_offset)*1000
 	if j==3: sounds.play("miss",0.55)
 	else:
-		effects.burst(Vector2(180,460),skin_color,j==0)
-		if combo>0 and combo%4==0:
-			sounds.play("perfect",0.4)
-			effects.combo_pop(combo)
+		effects.burst(Vector2(180,406+int(notes[index].get("lane",0))*76 if is_double() else 460),skin_color,j==0)
+		if combo>0 and combo%(25 if not ranker_id.is_empty() else 4)==0:
+			sounds.play("perfect",0.18 if is_song() else 0.4)
+			effects.combo_pop(combo,Vector2(180,406+int(notes[index].get("lane",0))*76 if is_double() else 460))
 	if not practice: send_packet({"type":"progress","combo":combo,"resolved":live_judgments.size()})
 
 func judge_tap(t: float, lane := 0) -> void:
 	var best := -1
-	var error := 0.180001
+	var error := hit_window()+.000001
 	for i in range(notes.size()):
 		if resolved.has(i) or int(notes[i].get("lane",0))!=lane: continue
 		var difference := absf(t-float(notes[i].t))
 		if difference<=error:
 			error=difference
 			best=i
+			if not ranker_id.is_empty():break
 	if best<0:
 		combo=0
 		show_judgment(INF)
@@ -584,7 +664,7 @@ func judge_hold(t: float, d: float) -> void:
 	var index := active_hold
 	# Direct calls are also used by deterministic scoring tests.
 	if index<0:
-		var best_error := 0.180001
+		var best_error := hit_window()+.000001
 		for i in range(notes.size()):
 			if resolved.has(i) or float(notes[i].d)<0.3: continue
 			var error := absf(t-float(notes[i].t))
@@ -642,6 +722,8 @@ func save_current_pattern() -> void:
 	emote_until=now()+4
 
 func start_challenge(id: String) -> void:
+	ranker_id="";ranker_session=""
+	story_music.stop()
 	double_practice=false
 	map_id=""
 	practice=true
@@ -672,6 +754,8 @@ func next_solo_wave() -> void:
 	start_solo_wave()
 
 func finish_local_round() -> void:
+	if not ranker_id.is_empty():
+		finish_ranker();return
 	if not map_id.is_empty():
 		finish_map()
 		return
@@ -702,18 +786,24 @@ func finish_local_round() -> void:
 
 func toggle_pause() -> void:
 	if not practice or phase!="play": return
+	if not ranker_id.is_empty() and not ranker_training:
+		emote_text="정식 랭커 도전은 일시정지할 수 없어요. 구간 연습에서는 가능해요.";emote_until=now()+3;return
 	if key_held or (is_double() and (double_beat.held[0] or double_beat.held[1])):
 		hint.text="키를 뗀 후 잠시 멈출 수 있어요."
 		return
 	if not paused:
 		paused=true
 		paused_at=now()
+		story_music.pause(true)
 	else:
 		origin+=now()-paused_at
 		paused=false
+		story_music.pause(false)
 
 func replay_last() -> void:
 	if not practice or phase!="result": return
+	if not ranker_id.is_empty():
+		start_ranker(ranker_id,ranker_kind,ranker_training,speed,ranker_seek,ranker_end);return
 	if not map_id.is_empty():
 		start_map(map_id,map_training,speed,map_guide)
 		return
@@ -722,6 +812,13 @@ func replay_last() -> void:
 	else: begin_play()
 
 func _process(delta: float) -> void:
+	if phase=="lobby" and interface and interface.page!="ranker":ranker_waiting.clear()
+	if ranker_upload_pending and now()-ranker_upload_at>10:
+		ranker_upload_pending=false;reward_text="글로벌 등록을 확인하지 못했어요. 로컬 기록은 저장됐어요."
+	if not ranker_waiting.is_empty() and now()-ranker_request_at>12:
+		var pending_ranker:=ranker_waiting.duplicate();ranker_waiting.clear()
+		emote_text="연결이 지연되어 로컬 기록으로 시작해요.";emote_until=now()+5
+		if interface.page=="ranker" or phase=="result":launch_ranker(pending_ranker.id,pending_ranker.kind)
 	socket.poll()
 	var state := socket.get_ready_state()
 	if state == WebSocketPeer.STATE_OPEN:
@@ -782,17 +879,22 @@ func _process(delta: float) -> void:
 				result.text="이 비트로 공격할까?"
 				hint.text="ENTER 전송   ·   R 다시 만들기   ·   P 다시 듣기"
 		elif phase=="play":
-			var t := (now()-origin)*speed
-			if not map_id.is_empty(): update_map_audio(t)
+			var t := play_time()
+			if is_song():
+				update_map_audio(t)
+				t=play_time()
+			if is_song() and not story_music.failure().is_empty():
+				var destination:="ranker" if not ranker_id.is_empty() else "solo"
+				open_menu(destination);emote_text="음악을 불러오지 못했어요. 연결을 확인하고 다시 시작해 주세요.";emote_until=now()+5;return
 			if t<0:
-				var tick := ceili(-t/speed)
+				var tick := ceili(-t/(60.0/song_bpm())) if is_song() else ceili(-t/speed)
 				if combo==0: result.text="READY  %d"%tick
 				if tick!=countdown_tick:
 					countdown_tick=tick
-					sounds.play("count",0.5)
+					if not is_song():sounds.play("count",0.5)
 			elif countdown_tick!=0:
 				countdown_tick=0
-				sounds.play("go",0.5)
+				if not is_song():sounds.play("go",0.5)
 				if combo==0: result.text="GO!"
 			if t>=0 and not practice and slot==attacker: result.text="상대가 수비하는 중…"
 			if active_hold>=0 and key_held and not resolved.has(active_hold):
@@ -802,15 +904,16 @@ func _process(delta: float) -> void:
 					last_hold_sound=now()
 					sounds.play("hold",0.12)
 					flash=maxf(flash,0.3)
+			var judgment_time:=input_time()
 			for i in range(notes.size()):
-				if not resolved.has(i) and input_time()>float(notes[i].t)+float(notes[i].d)+0.180001:
+				if not resolved.has(i) and judgment_time>float(notes[i].t)+float(notes[i].d)+hit_window()+.000001:
 					resolved[i]=true
 					if practice or slot!=attacker: register_judgment(i,INF)
 			if solo_id=="survival" and energy<=0:
 				if is_double(): double_beat.release_all()
 				elif key_held: release_hit(input_time())
 				finish_local_round()
-			elif t>pattern_end()+0.5+absf(float(preferences.values.offset_ms))/1000*speed:
+			elif t>round_end()+absf(float(preferences.values.offset_ms))/1000*speed:
 				if is_double(): double_beat.release_all()
 				elif key_held: release_hit(input_time())
 				if practice: finish_local_round()
@@ -864,11 +967,11 @@ func _draw() -> void:
 			var start := Vector2(left,y)+Vector2(cos(angle),sin(angle))*(25+(1-flash)*20)
 			draw_line(start,start+Vector2(cos(angle),sin(angle))*9,Color(CYAN,flash),2,true)
 	if phase in ["play","preview"]:
-		var t := ((paused_at if paused else now())-origin)*speed
+		var t := play_time()
 		for i in range(notes.size()):
 			var n: Dictionary = notes[i]
-			var x := left+(float(n.t)-t)*260
-			var tail := x+float(n.d)*260
+			var x := left+(float(n.t)-t)*scroll_pixels()
+			var tail := x+float(n.d)*scroll_pixels()
 			if tail<60 or x>1090 or resolved.has(i): continue
 			if float(n.d)>0:
 				draw_line(Vector2(maxf(x,65),y),Vector2(minf(tail,1090),y),Color(skin_color,.12),30,true)
@@ -904,7 +1007,7 @@ func draw_record_note(start: float, duration: float, current: float, active: boo
 	if x>=65: draw_note(Vector2(x,460),color)
 
 func draw_note(pos: Vector2, color: Color) -> void:
-	NoteSkin.draw(self,pos,color,str(profile.get("skin","mint")))
+	NoteSkin.draw(self,pos,color,str(profile.get("skin","mint")),12.0 if not ranker_id.is_empty() else 18.0)
 
 func panel_style() -> StyleBoxFlat:
 	if lane_style: return lane_style
@@ -921,6 +1024,7 @@ func panel_style() -> StyleBoxFlat:
 
 
 func start_map(id: String, training := false, rate := 1.0, guide := false) -> void:
+	ranker_id="";ranker_session=""
 	double_practice=false
 	var data:=Maps.find(id)
 	if data.is_empty() or (not training and not Maps.unlocked(id,preferences.records)):return
@@ -944,24 +1048,21 @@ func start_map(id: String, training := false, rate := 1.0, guide := false) -> vo
 
 func update_map_audio(t: float) -> void:
 	if t<0:return
-	var data:=Maps.find(map_id)
-	var tick:=int(t/(60.0/float(data.bpm)*.5))
-	if tick!=map_tick:
-		map_tick=tick
-		sounds.backing(tick,int(data.region))
+	story_music.start(t)
 	if map_guide:
 		while map_guide_index<notes.size() and t>=float(notes[map_guide_index].t):
 			sounds.play("note%d"%posmod(map_guide_index,8),.25)
 			map_guide_index+=1
 
 func finish_map() -> void:
+	story_music.stop()
 	last_report=Scoring.analyze(notes,hits)
 	last_report_mine=true
 	phase="result"
 	match_finished=true
 	var cleared:=float(last_report.accuracy)>=60
 	if not map_training:new_best=preferences.remember(Maps.record_id(map_id),last_report)
-	result.text="연습 완료!" if map_training else "맵 클리어!" if cleared else "한 번 더 도전해볼까?"
+	result.text="연습 완료!" if map_training else ("보스 격파!" if int(map_id.substr(1))%4==0 else "신호 복구!") if cleared else "한 번 더 도전해볼까?"
 	result.add_theme_color_override("font_color",Color("f1edff"))
 	next_button.hide()
 	if cleared:
@@ -998,7 +1099,7 @@ func clipboard_result(_args: Array, succeeded: bool) -> void:
 	emote_until=now()+3
 
 func is_double() -> bool:
-	return double_practice if practice else room_settings.mode=="double"
+	return ranker_kind=="double" if not ranker_id.is_empty() else double_practice if practice else room_settings.mode=="double"
 
 func pattern_end() -> float:
 	var end:=0.0
@@ -1010,3 +1111,76 @@ func start_double_training() -> void:
 	notes=[{"t":0.0,"d":0.0,"lane":0},{"t":0.5,"d":0.0,"lane":1},{"t":1.0,"d":0.0,"lane":0},{"t":1.0,"d":0.0,"lane":1},{"t":1.75,"d":1.0,"lane":0},{"t":2.0,"d":0.0,"lane":1},{"t":2.5,"d":0.0,"lane":1},{"t":3.25,"d":0.0,"lane":0}]
 	begin_play()
 	status.text="DOUBLE BEAT · F 위 / J 아래 · 교차·동시·홀드 연습"
+
+func play_time() -> float:
+	if is_song() and phase=="play" and story_music.started and DisplayServer.get_name()!="headless":
+		return (story_music.last_clock if paused else story_music.time())-story_music.pre_roll
+	return ((paused_at if paused else now())-origin)*speed
+
+func round_end() -> float:
+	if not ranker_id.is_empty():return (ranker_end if ranker_end>0 else float(Ranker.find(ranker_id).duration))-ranker_seek+.05
+	if not map_id.is_empty():
+		var data:=Maps.find(map_id)
+		return float(data.bars)*4*60.0/float(data.bpm)+.25
+	return pattern_end()+.5
+
+func is_song() -> bool:return not map_id.is_empty() or not ranker_id.is_empty()
+func song_bpm() -> float:
+	if not ranker_id.is_empty():return float(Ranker.section(ranker_id,ranker_seek).bpm)
+	return float(Maps.find(map_id).bpm) if not map_id.is_empty() else 120.0
+func judge_windows() -> Array:return Ranker.WINDOWS if not ranker_id.is_empty() else Scoring.WINDOWS
+func hit_window() -> float:return float(judge_windows()[2])
+
+func start_ranker(id: String,kind: String,training := false,rate := 1.0,seek := 0.0,end := 0.0) -> void:
+	var song:=Ranker.find(id)
+	if song.is_empty() or not kind in ["one","double"]:return
+	if not training and not profile.is_empty() and accounts_enabled:
+		if not ranker_waiting.is_empty():return
+		ranker_waiting={"id":id,"kind":kind};ranker_request_at=now()
+		queue_request({"type":"ranker_begin","id":id,"kind":kind})
+		status.text="기록 도전을 준비하고 있어요…";return
+	launch_ranker(id,kind,training,rate,seek,end)
+
+func launch_ranker(id: String,kind: String,training := false,rate := 1.0,seek := 0.0,end := 0.0) -> void:
+	map_id="";map_guide=false;solo_id="";practice=true;slot=0;attacker=0
+	if training or profile.is_empty():ranker_session=""
+	ranker_id=id;ranker_kind=kind;ranker_training=training;ranker_seek=seek if training else 0.0;ranker_end=end if training else 0.0
+	speed=clampf(rate,.5,1) if training else 1.0
+	notes=Ranker.chart(id,kind,ranker_seek,ranker_end);new_best=false;reward_text=""
+	begin_play();match_finished=false
+	status.text="RANKER / %s / %s / %s"%["DOUBLE" if kind=="double" else "ONE BEAT",str(Ranker.find(id).title),"연습 %.2fx"%speed if training else "STRICT TIMING"]
+
+func finish_ranker() -> void:
+	story_music.stop()
+	last_report=Scoring.analyze(notes,hits,Ranker.WINDOWS,true)
+	last_report.grade=Ranker.grade(last_report.accuracy)
+	last_report_mine=true;phase="result";match_finished=true
+	if not ranker_training:new_best=preferences.remember(Ranker.record_id(ranker_id,ranker_kind),last_report)
+	result.text="연습 완료" if ranker_training else "RANKER CLEAR" if last_report.accuracy>=75 else "RETRY THE LIMIT"
+	next_button.hide()
+	if not ranker_training and not ranker_session.is_empty():
+		ranker_upload_pending=true;ranker_upload_at=now();reward_text="글로벌 기록 등록 중…"
+		queue_request({"type":"ranker_result","session":ranker_session,"hits":hits})
+		ranker_session=""
+	if last_report.accuracy>=75:sounds.fanfare();effects.confetti()
+
+func scroll_pixels() -> float:
+	return 260*1.55*float(preferences.values.ranker_scroll) if not ranker_id.is_empty() else 260.0
+func restart_practice_current() -> void:
+	if not practice:return
+	if not ranker_id.is_empty():launch_ranker(ranker_id,ranker_kind,true,speed,ranker_seek,ranker_end)
+	elif not map_id.is_empty():start_map(map_id,map_training,speed,map_guide)
+	elif not solo_id.is_empty():start_challenge(solo_id)
+	else:begin_play()
+
+func web_key_delay(event: InputEventKey) -> float:
+	if event.has_meta("pointer"):return float(event.get_meta("pointer_delay",0.0))
+	if web_input==null:return 0
+	var code:String={KEY_SPACE:"Space",KEY_D:"KeyD",KEY_F:"KeyF",KEY_J:"KeyJ",KEY_K:"KeyK"}.get(event.keycode,"")
+	if code.is_empty():return 0
+	var lag=web_input.take(code,event.pressed)
+	return clampf(float(lag)/1000.0,0,.5) if lag!=null else 0.0
+
+func web_pointer_delay(pressed:bool)->float:
+	if web_input==null:return 0
+	return clampf(float(web_input.takePointer(pressed))/1000.0,0,.5)

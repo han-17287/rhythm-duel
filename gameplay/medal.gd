@@ -8,7 +8,7 @@ func _process(delta: float) -> void:
 	if moving:elapsed+=delta
 	queue_redraw()
 func _draw() -> void:
-	var color: Color={"S":Color("ffd477"),"A":Color("6be8c7"),"B":Color("b79cff"),"C":Color("91c6ff"),"D":Color("ff9caa")}.get(grade,Color("b79cff"))
+	var color: Color={"EX":Color("fff0af"),"SS":Color("80faff"),"F":Color("ff719b"),"S":Color("ffd477"),"A":Color("6be8c7"),"B":Color("b79cff"),"C":Color("91c6ff"),"D":Color("ff9caa")}.get(grade,Color("b79cff"))
 	var center:=Vector2(75,80)
 	for i in range(12):
 		var angle:=i*TAU/12+elapsed*.12

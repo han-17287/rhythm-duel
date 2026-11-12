@@ -36,6 +36,13 @@ class Assets(unittest.IsolatedAsyncioTestCase):
             refused=await server.serve_game(None,Request('/index.wasm',Headers({'Accept-Encoding':'gzip;q=0, *;q=1'})))
             self.assertNotIn('Content-Encoding',refused.headers)
             self.assertFalse(assets.accepts_gzip('gzip;q=bad'))
+    async def test_ogg_mime_without_system_mime_database(self):
+        with tempfile.TemporaryDirectory() as folder,patch.object(server,'STATIC_DIR',Path(folder)),patch.object(server.mimetypes,'guess_type',return_value=(None,None)):
+            (Path(folder)/'song.ogg').write_bytes(b'OggS original music')
+            response=await server.serve_game(None,Request('/song.ogg',Headers()))
+            self.assertEqual(response.status_code,200)
+            self.assertEqual(response.headers['Content-Type'],'audio/ogg')
+            self.assertEqual(response.body,b'OggS original music')
     async def test_concurrent_reads_and_limit(self):
         with tempfile.TemporaryDirectory() as folder:
             path=Path(folder)/'small.bin';path.write_bytes(b'a'*100)

@@ -24,10 +24,10 @@ func confetti() -> void:
 		var color: Color = [Color("ff715c"),Color("b4a5ed"),Color("54f4d4"),Color("ffcc66")][i%4]
 		bits.append({"pos":Vector2(600,200),"v":Vector2(rng.randf_range(-270,270),rng.randf_range(-250,80)),"color":color,"life":1.3,"max":1.3,"size":rng.randf_range(3,6)})
 
-func combo_pop(count: int) -> void:
+func combo_pop(count: int, anchor := Vector2(180,460)) -> void:
 	if not enabled: return
-	callouts.append({"text":"%d COMBO!"%count,"life":.7,"max":.7,"pos":Vector2(60,420)})
-	rings.append({"pos":Vector2(180,460),"color":Color("ffdc88"),"life":.45,"max":.45})
+	callouts.append({"text":"%d COMBO!"%count,"life":.7,"max":.7,"pos":anchor+Vector2(-120,-40)})
+	rings.append({"pos":anchor,"color":Color("ffdc88"),"life":.45,"max":.45})
 
 func _process(delta: float) -> void:
 	for i in range(callouts.size()-1,-1,-1):

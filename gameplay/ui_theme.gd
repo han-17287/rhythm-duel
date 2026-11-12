@@ -10,7 +10,7 @@ static var fonts: Dictionary={}
 static var atlases: Dictionary={}
 static func font(kind: String) -> Font:
 	if fonts.has(kind):return fonts[kind]
-	var korean: Font=load("res://assets/NotoSansKR.ttf") if ResourceLoader.exists("res://assets/NotoSansKR.ttf") else ThemeDB.fallback_font
+	var korean: Font=load("res://assets/PerfectoUI.woff2") if ResourceLoader.exists("res://assets/PerfectoUI.woff2") else ThemeDB.fallback_font
 	var base: Font=korean
 	if kind=="display":
 		base=load("res://assets/ui/Oxanium.ttf")

@@ -2,7 +2,7 @@
 import gzip, io, os, platform, shutil, subprocess, urllib.request, zipfile
 from pathlib import Path
 from web_gl import patch as patch_web_gl
-VERSION='4.6.3'
+VERSION='4.7.2'
 ROOT=Path(__file__).resolve().parents[1]
 CACHE=ROOT/'.web-build-cache'
 BASE=f'https://github.com/godotengine/godot/releases/download/{VERSION}-stable/'
@@ -31,16 +31,11 @@ def main():
     CACHE.mkdir(exist_ok=True)
     (CACHE/'.gdignore').touch()
     assets=ROOT/'assets'; assets.mkdir(exist_ok=True)
-    font=assets/'NotoSansKR.ttf'
-    if not font.exists():
-        print('Downloading Korean font...',flush=True)
-        with urllib.request.urlopen('https://raw.githubusercontent.com/google/fonts/main/ofl/notosanskr/NotoSansKR%5Bwght%5D.ttf',timeout=90) as r:
-            font.write_bytes(r.read())
-        with urllib.request.urlopen('https://raw.githubusercontent.com/google/fonts/main/ofl/notosanskr/OFL.txt',timeout=30) as r:
-            (assets/'OFL.txt').write_bytes(r.read())
+    if not (assets/'PerfectoUI.woff2').is_file():
+        raise RuntimeError('Bundled Korean UI font is missing; restore assets/PerfectoUI.woff2')
     godot=os.environ.get('GODOT_BIN') or shutil.which('godot')
     if not godot:
-        if platform.machine() not in ('x86_64','AMD64'): raise RuntimeError('Set GODOT_BIN to a Godot 4.6.3 executable')
+        if platform.machine() not in ('x86_64','AMD64'): raise RuntimeError('Set GODOT_BIN to a Godot 4.7.2 executable')
         binary=CACHE/f'Godot_v{VERSION}-stable_linux.x86_64'
         if not binary.exists():
             print('Downloading Godot editor...',flush=True)
@@ -77,10 +72,12 @@ def main():
     shell=html.read_text()
     shell=shell.replace('<html lang="en">','<html lang="ko">')
     shell=shell.replace('<canvas id="canvas">','<canvas id="canvas" aria-label="PERFECTO 리듬 대전 게임">')
-    shell=shell.replace('</head>', '''<meta name="description" content="내가 만든 여덟 개의 비트로 친구와 겨루는 온라인 리듬 대전, PERFECTO.">
+    shell=shell.replace('</head>', '''<meta name="description" content="친구와 리듬 대전, 오리지널 음악을 연주하는 스토리, 원비트·더블 랭커에 도전하는 PERFECTO.">
 <meta name="theme-color" content="#121122">
+
 <style>
 body,#status{background:#121122}
+#canvas{touch-action:none}
 #status-splash{max-width:min(640px,92vw);max-height:70vh}
 #status-progress{position:absolute;bottom:14%;width:min(360px,70vw);height:6px;border:0;border-radius:8px;overflow:hidden;background:#342b48;accent-color:#6fffe0}
 #status-progress::-webkit-progress-bar{background:#342b48;border-radius:8px}
@@ -94,16 +91,22 @@ body,#status{background:#121122}
     shell=shell.replace('<progress id="status-progress">','<div id="loading-caption">비트를 준비하는 중…<br><small>첫 접속은 파일을 내려받는 데 시간이 걸릴 수 있어요.</small></div><progress id="status-progress">')
     shell=shell.replace("statusNotice.style.display = mode === 'notice' ? 'block' : 'none';", "statusNotice.style.display = mode === 'notice' ? 'block' : 'none';\n        document.getElementById('loading-caption').style.display = mode === 'notice' ? 'none' : 'block';")
     shell=shell.replace('</body>','<div id="portrait-hint">가로로 돌리면 더 편하게 플레이할 수 있어요.</div></body>')
+    shell=shell.replace('</head>','<script>'+ (ROOT/'tools/web_input.js').read_text()+'\n'+(ROOT/'tools/web_music.js').read_text()+'</script></head>')
+    for folder in ['music','ranker']:
+        destination=output/'audio'/folder
+        destination.mkdir(parents=True,exist_ok=True)
+        for song in (assets/folder).glob('*.ogg'): shutil.copyfile(song,destination/song.name)
     html.write_text(shell)
     if not (output/'index.wasm').is_file(): raise RuntimeError('Web export did not produce WebAssembly')
     for asset in output.iterdir():
         if asset.suffix in ('.wasm','.pck','.js'):
             asset.with_name(asset.name+'.gz').write_bytes(gzip.compress(asset.read_bytes(),compresslevel=6,mtime=0))
     output.chmod(0o755)
-    for asset in output.iterdir():
+    for asset in output.rglob("*"):
         if asset.is_file(): asset.chmod(0o644)
+        elif asset.is_dir(): asset.chmod(0o755)
     with zipfile.ZipFile(ROOT/'build/rhythm-duel-web.zip','w',zipfile.ZIP_DEFLATED) as z:
-        for f in output.iterdir():
-            if f.is_file() and f.suffix!='.gz': z.write(f,f.name)
+        for f in output.rglob("*"):
+            if f.is_file() and f.suffix!='.gz': z.write(f,f.relative_to(output))
     print('READY: build/web/index.html and build/rhythm-duel-web.zip',flush=True)
 if __name__=='__main__': main()

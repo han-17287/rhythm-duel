@@ -5,7 +5,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxrandr2 libxi6 libgl1 libasound2 libpulse0 libudev1 \
     && rm -rf /var/lib/apt/lists/*
 # Bump this revision for client-only releases under Render rootDir=server.
-ARG CLIENT_REVISION=double-beat-ui-v2
+ARG CLIENT_REVISION=ranker-full-soundtrack-v2
 ADD https://codeload.github.com/han-17287/rhythm-duel/zip/refs/heads/main?revision=${CLIENT_REVISION} /tmp/game.zip
 RUN python -m zipfile -e /tmp/game.zip /src
 WORKDIR /src/rhythm-duel-main
@@ -15,7 +15,8 @@ FROM python:3.12-slim-bookworm
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY server.py accounts.py scoring.py assets.py ./
+COPY server.py accounts.py scoring.py assets.py ranker.py ./
+COPY --from=web-build /src/rhythm-duel-main/assets/ranker/catalog.json ./ranker_charts.json
 COPY --from=web-build /src/rhythm-duel-main/build/web ./static
 RUN chmod a+r /app/*.py /app/requirements.txt && chmod -R a+rX /app/static
 USER 65534:65534

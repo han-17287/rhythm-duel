@@ -40,10 +40,13 @@ STATIC_DIR="$PWD/build/web" python3 server/server.py
 
 먼저 `python3 -m pip install -r server/requirements.txt`로 서버 의존성을 설치하세요. 이후 http://localhost:8765 에서 플레이할 수 있습니다.
 
-빌드 도구는 Godot 4.6.3, 같은 버전의 Web 전용 내보내기 템플릿, SIL OFL 라이선스의 Noto Sans KR 글꼴을 내려받습니다. Godot가 설치되어 있다면 버전이 일치해야 하며 `GODOT_BIN` 환경변수로 실행 파일을 지정할 수도 있습니다. Linux 서버에서 필요한 시스템 라이브러리는 `server/Dockerfile`을 참고하세요.
+빌드 도구는 Godot 4.7.2와 같은 버전의 Web 전용 내보내기 템플릿을 내려받습니다. 한국어 UI용 PERFECTO UI 글꼴은 저장소에 포함되어 있으며 Noto Sans KR에서 파생한 SIL OFL 글꼴입니다(`assets/FONTLOG.txt`, `assets/OFL.txt`). Godot가 설치되어 있다면 버전이 일치해야 하며 `GODOT_BIN` 환경변수로 실행 파일을 지정할 수도 있습니다. Linux 서버에서 필요한 시스템 라이브러리는 `server/Dockerfile`을 참고하세요.
 
-출력은 `build/web/`이며, 별도 호스팅에 올릴 ZIP은 `build/rhythm-duel-web.zip`입니다. ZIP 최상위에 index.html과 모든 내보내기 파일이 포함됩니다. 별도 호스팅을 사용할 경우 게임의 서버 설정에서 `wss://rhythm-duel.onrender.com`을 입력하세요. HTTPS 페이지에서는 wss:// 주소가 필요합니다.
+출력은 `build/web/`이며, 별도 호스팅에 올릴 ZIP은 `build/rhythm-duel-web.zip`입니다. ZIP에 index.html과 모든 내보내기 파일, 음악용 `audio/` 하위 폴더가 포함됩니다. 웹에서는 이 빌드 도구가 음악 재생과 실제 입력 시각을 동기화하는 브라우저 코드를 함께 넣으므로 `build/web/` 폴더 전체를 배포하세요. 별도 호스팅을 사용할 경우 게임의 서버 설정에서 `wss://rhythm-duel.onrender.com`을 입력하세요. HTTPS 페이지에서는 wss:// 주소가 필요합니다.
 
 ## 검증
 
 서버 테스트는 같은 포트의 HTTP 게임 파일 제공과 WebSocket 방 연결, 올바른 WebAssembly MIME 타입, 경로 접근 제한 및 6회 공수·점수 계산을 검사합니다. 로컬 Chromium에서 Web 빌드 실행과 한글 표시, 두 브라우저의 방 코드 참가·리듬 제작·수비 화면도 확인했습니다. 실제 Render 배포 완료 상태는 Render 대시보드에서 확인해야 합니다.
+
+
+랭커 글로벌 기록판과 첫 클리어 보상은 기존 계정 저장소(`DATABASE_URL`)를 사용합니다. 별도 테이블은 서버 시작 시 자동 생성됩니다. 저장소가 없을 때도 원비트·더블과 모든 구간 연습, 기기 최고 기록은 사용할 수 있습니다.

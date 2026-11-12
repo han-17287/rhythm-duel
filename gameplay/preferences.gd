@@ -1,6 +1,6 @@
 extends RefCounted
 
-const DEFAULTS = {"volume":0.55,"effects":true,"reduced_motion":false,"metronome":false,"bpm":120,"offset_ms":0,"key":"SPACE"}
+const DEFAULTS = {"volume":0.55,"music_volume":0.8,"ranker_scroll":1.0,"effects":true,"reduced_motion":false,"metronome":false,"bpm":120,"offset_ms":0,"key":"SPACE"}
 var values: Dictionary = DEFAULTS.duplicate()
 var records: Dictionary = {}
 var patterns: Array = []
@@ -29,6 +29,8 @@ func load_data() -> void:
 				values[key]=int(incoming[key]) if typeof(DEFAULTS[key])==TYPE_INT else float(incoming[key])
 			elif typeof(incoming[key])==typeof(DEFAULTS[key]): values[key]=incoming[key]
 	values.volume = clampf(float(values.volume),0,1)
+	values.music_volume = clampf(float(values.music_volume),0,1)
+	values.ranker_scroll=clampf(float(values.ranker_scroll),.8,1.4)
 	values.bpm = clampi(int(values.bpm),60,200)
 	values.offset_ms = clampi(int(values.offset_ms),-150,150)
 	if not values.key in ["SPACE","D","F","J","K"]: values.key = "SPACE"

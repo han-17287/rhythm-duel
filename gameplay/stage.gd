@@ -35,7 +35,7 @@ func draw_menu() -> void:
 	g.draw_line(Vector2(48,92),Vector2(1104,92),Color("26384f"),1)
 	g.draw_line(Vector2(48,92),Vector2(166,92),Color("6fffe0"),3,true)
 	if g.phase=="lobby" and g.interface:
-		var tabs: Dictionary={"home":Vector2(269,349),"rooms":Vector2(394,474),"solo":Vector2(519,599),"arcade":Vector2(519,599),"library":Vector2(519,599),"shop":Vector2(644,724),"auth":Vector2(784,986),"settings":Vector2(1022,1050)}
+		var tabs: Dictionary={"home":Vector2(269,329),"rooms":Vector2(367,427),"solo":Vector2(465,525),"arcade":Vector2(465,525),"library":Vector2(465,525),"ranker":Vector2(563,623),"shop":Vector2(661,721),"auth":Vector2(784,986),"settings":Vector2(1022,1050)}
 		if tabs.has(g.interface.page):
 			var span: Vector2=tabs[g.interface.page]
 			g.draw_line(Vector2(span.x,78),Vector2(span.y,78),Color("6fffe0"),2,true)
@@ -64,6 +64,8 @@ func draw() -> void:
 		var region: int=int(g.Maps.find(g.map_id).region)
 		accent=[Color("66ffe3"),Color("ffd388"),Color("c3a3ff")][region]
 		glow_key=["cyan","coral","violet"][region]
+	if not g.ranker_id.is_empty():
+		accent=Color(str(g.Ranker.find(g.ranker_id).color));glow_key="violet" if int(g.ranker_id.substr(1))>=3 else "cyan"
 	g.draw_rect(Rect2(0,0,1152,720),Color("070e1c"))
 	g.draw_texture_rect(glows.violet,Rect2(480+sin(t*.25)*30,-160,900,900),false)
 	g.draw_texture_rect(glows[glow_key],Rect2(-220,100,800,800),false)
@@ -83,6 +85,7 @@ func draw() -> void:
 	g.draw_line(Vector2(48,92),Vector2(210,92),accent,3,true)
 	var captions: Dictionary={"record":"CREATE YOUR BEAT","review":"CHECK & SEND","preview":"LISTEN TO YOUR BEAT","play":"ECHO THE RHYTHM","waiting":"OPPONENT IS CREATING","result":"BATTLE REPORT"}
 	var caption: String=captions.get(g.phase,"")
+	if not g.ranker_id.is_empty():caption="RANKER / "+("DOUBLE" if g.ranker_kind=="double" else "ONE BEAT")
 	if not g.map_id.is_empty():caption="MAP "+g.map_id.substr(1)+(" / PRACTICE" if g.map_training else " / RHYTHM JOURNEY")
 	g.draw_circle(Vector2(430,47),3,Color(accent,.7+(.25*sin(t*4) if moving else 0)))
 	g.draw_string(ThemeDB.fallback_font,Vector2(445,53),caption,HORIZONTAL_ALIGNMENT_LEFT,-1,14,Color("a99bbe"))
@@ -91,7 +94,7 @@ func draw() -> void:
 	if not g.map_id.is_empty():
 		var data: Dictionary=g.Maps.find(g.map_id)
 		steps=4
-		current=mini(3,int(maxf(0,g.input_time())/(float(data.bars)*60.0/float(data.bpm))))
+		current=mini(3,int(maxf(0,g.play_time())/(float(data.bars)*60.0/float(data.bpm))))
 	elif not g.practice:
 		steps=int(g.room_settings.rounds)*2
 		current=g.turn_index
@@ -109,6 +112,12 @@ func draw() -> void:
 			var height: float=8+absf(sin(t*2.3+i*.8))*22+g.flash*13
 			g.draw_line(Vector2(1059+i*4,314),Vector2(1059+i*4,314-height),Color(accent,.4),2,true)
 		panel(Rect2(46,353,1060,170),Color(accent,.07),Color(accent,.4),21)
+	if not g.ranker_id.is_empty() and g.phase=="play" and g.play_time()>=0:
+		var bar:Dictionary=g.Ranker.section(g.ranker_id,g.play_time()+g.ranker_seek)
+		var beat_phase:float=fposmod((g.play_time()+g.ranker_seek-float(bar.t))*float(bar.bpm)/60.0,1)
+		var pulse:float=maxf(0,1-beat_phase*4) if moving else 0
+		g.draw_rect(Rect2(48,95,1056,230),Color(accent,pulse*.035))
+		preload("res://gameplay/ranker_cover.gd").paint(g,Vector2(570,254),70,int(g.ranker_id.substr(1))-1,Color(accent,.34),t,pulse)
 	# Edge equalizers react to every hit instead of moving the target notes.
 	for side in [0,1]:
 		for i in range(5):
@@ -116,7 +125,7 @@ func draw() -> void:
 			var x: float=10+i*5 if side==0 else 1118+i*5
 			g.draw_line(Vector2(x,665),Vector2(x,665-h),Color(accent,.35),3,true)
 	if g.phase=="play" and not g.paused:
-		var until: float=g.origin-g.now()
+		var until: float=-g.play_time()/(60.0/g.song_bpm() if g.is_song() else g.speed)
 		if until>0:
 			var fraction: float=until-floorf(until)
 			var center:=Vector2(570,254)
@@ -136,8 +145,8 @@ func draw_progress() -> void:
 		ratio=float(g.used)/8
 		if g.key_held: ratio=minf(1,(g.used+maxf(1,g.now()-g.origin-g.down))/8)
 	else:
-		var end:=maxf(1,g.pattern_end())
-		var time: float=((g.paused_at if g.paused else g.now())-g.origin)*g.speed
+		var end:=maxf(1,g.round_end())
+		var time: float=g.play_time()
 		ratio=clampf(time/end,0,1)
 	g.draw_line(Vector2(50,529),Vector2(1102,529),Color("332b4c"),4,true)
 	if ratio>0:g.draw_line(Vector2(50,529),Vector2(50+1052*ratio,529),Color("ff86a5") if g.phase in ["record","review"] else Color("66ffe3"),4,true)

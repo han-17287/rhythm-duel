@@ -4,6 +4,11 @@ var g: Control
 var ui_ref: WeakRef
 var ui: RefCounted:
 	get: return ui_ref.get_ref()
+var calibration_ui: RefCounted
+var ranker_ui: RefCounted
+var story_hud: RefCounted
+var music_slider: HSlider
+var music_value: Label
 var map_ui: RefCounted
 var course_page: Control
 var settings_page: Control
@@ -71,6 +76,10 @@ func _init(game: Control, base_ui: RefCounted) -> void:
 func build() -> void:
 	map_ui=preload("res://gameplay/map_interface.gd").new(g,ui)
 	map_ui.build()
+	ranker_ui=preload("res://gameplay/ranker_interface.gd").new(g,ui)
+	ranker_ui.build()
+	calibration_ui=preload("res://gameplay/calibration.gd").new(g,ui)
+	calibration_ui.build()
 
 	touch_input=Button.new()
 	touch_input.position=Vector2(870,541)
@@ -80,12 +89,18 @@ func build() -> void:
 	touch_input.button_down.connect(func(): g.pointer_input(true))
 	touch_input.button_up.connect(func(): g.pointer_input(false))
 	g.add_child(touch_input)
+	var touch_image:=Image.create(110,82,false,Image.FORMAT_RGBA8);touch_image.fill(Color(0,0,0,0))
+	var touch_texture:=ImageTexture.create_from_image(touch_image)
 	for lane in range(2):
 		var pad:=Button.new()
 		pad.position=Vector2(870+lane*122,541);pad.size=Vector2(110,82);pad.focus_mode=Control.FOCUS_NONE
 		for state in ["normal","hover","pressed","focus"]:pad.add_theme_stylebox_override(state,StyleBoxEmpty.new())
-		pad.button_down.connect(g.double_beat.press.bind(lane,true));pad.button_up.connect(g.double_beat.press.bind(lane,false))
+		pad.button_down.connect(g.double_beat.pointer.bind(lane,true));pad.button_up.connect(g.double_beat.pointer.bind(lane,false))
 		g.add_child(pad);double_touch.append(pad)
+		var touch:=TouchScreenButton.new();touch.position=Vector2(870+lane*122,541);touch.texture_normal=touch_texture;touch.shape_centered=true;touch.visibility_mode=TouchScreenButton.VISIBILITY_TOUCHSCREEN_ONLY
+		var shape:=RectangleShape2D.new();shape.size=Vector2(110,82);touch.shape=shape
+		touch.pressed.connect(g.double_beat.pointer.bind(lane,true));touch.released.connect(g.double_beat.pointer.bind(lane,false))
+		g.add_child(touch);double_touch.append(touch)
 	emotes=ui.selector(g,Rect2(785,124,319,44),["친구에게 한마디","준비 완료!","좋은 리듬!","한 판 더!","멋진 수비!"])
 	emotes.item_selected.connect(func(i):
 		if i>0: g.send_packet({"type":"emote","emote":["","준비 완료!","좋은 리듬!","한 판 더!","멋진 수비!"][i]})
@@ -175,7 +190,8 @@ func build() -> void:
 	medal_art.position=Vector2(0,5)
 	medal_art.size=Vector2(150,165)
 	panel.add_child(medal_art)
-	grade=ui.text(panel,"S",42,26,82,Color("fff0c0"))
+	grade=ui.text(panel,"S",0,5,82,Color("fff0c0"))
+	grade.size=Vector2(150,160);grade.horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER;grade.vertical_alignment=VERTICAL_ALIGNMENT_CENTER
 	grade.add_theme_font_override("font",ui.Design.font("display"))
 	medal=ui.text(panel,"",24,171,13,Color("d0b3ff"))
 	score_caption=ui.text(panel,"ROUND SCORE",190,16,13,Color("a8a0c3"))
@@ -198,7 +214,7 @@ func build() -> void:
 	footer=ui.text(g,"",50,559,14,ui.MUTED)
 	replay=ui.button(g,"같은 비트 다시 도전",Rect2(50,590,268,55),g.replay_last,true)
 	advance=ui.button(g,"다음 웨이브  →",Rect2(337,590,268,55),g.next_solo_wave,true)
-	course_back=ui.button(g,"연습실로",Rect2(624,590,230,55),func(): g.open_menu("solo"))
+	course_back=ui.button(g,"연습실로",Rect2(624,590,230,55),func(): g.open_menu("ranker" if not g.ranker_id.is_empty() else "solo"))
 	rematch=ui.button(g,"한 판 더!  →",Rect2(50,590,280,55),func(): g.send_packet({"type":"rematch"}),true)
 
 	settings_page=ui.group()
@@ -225,7 +241,10 @@ func build() -> void:
 	bpm_select.item_selected.connect(func(i):
 		g.preferences.values.bpm=[80,100,120,140,160][i]
 		changed())
-	ui.text(left,"메트로놈은 리듬 제작 때만 들려요.\n녹음하는 간격은 자동으로 보정하지 않아요.",24,248,16,ui.MUTED)
+	music_value=ui.text(left,"",24,246,15,ui.MUTED)
+	music_slider=HSlider.new();music_slider.position=Vector2(24,282);music_slider.size=Vector2(458,28);music_slider.max_value=1;music_slider.step=.05;music_slider.value=float(g.preferences.values.music_volume)
+	ui.decorate_slider(music_slider);left.add_child(music_slider)
+	music_slider.value_changed.connect(func(v):g.preferences.values.music_volume=v;changed())
 	var right: Panel=ui.card(settings_page,Rect2(578,238,526,337))
 	ui.text(right,"입력과 화면",24,18,24)
 	key_select=ui.selector(right,Rect2(24,68,478,44),["SPACE","D","F","J","K"])
@@ -263,8 +282,9 @@ func build() -> void:
 	var p: Panel=ui.card(pause_panel,Rect2(300,230,552,276))
 	p.add_theme_stylebox_override("panel",ui.style(Color("211d36"),Color("8e6fb0")))
 	ui.text(p,"잠깐, 쉬어갈까?",38,31,33,Color("f1ecff"))
-	ui.text(p,"연습은 멈춰도 괜찮아. 다시 이어서 해봐.",38,99,17,Color("c0b5d2"))
+	ui.text(p,"ESC 계속하기 · R 이 구간 다시 시작",38,99,17,Color("c0b5d2"))
 	ui.button(p,"ESC  계속하기",Rect2(38,159,476,65),g.toggle_pause,true)
+	story_hud=preload("res://gameplay/story_hud.gd").new(g,ui)
 
 func changed() -> void:
 	g.apply_preferences()
@@ -273,6 +293,7 @@ func changed() -> void:
 func reset_settings() -> void:
 	g.preferences.values=g.preferences.DEFAULTS.duplicate()
 	volume_slider.value=float(g.preferences.values.volume)
+	music_slider.value=float(g.preferences.values.music_volume)
 	offset_slider.value=0
 	key_select.select(0)
 	bpm_select.select(2)
@@ -281,6 +302,8 @@ func reset_settings() -> void:
 func sync() -> void:
 	apply_stage_theme(g.stage.active())
 	map_ui.sync()
+	ranker_ui.sync()
+	calibration_ui.sync()
 	for nav in g.get_tree().get_nodes_in_group("perfecto_menu_nav"):
 		if g.is_ancestor_of(nav) and nav.get_meta("menu_action","")!="전체 화면":
 			nav.disabled=g.phase!="lobby"
@@ -345,11 +368,13 @@ func sync() -> void:
 		ui.tips.visible=false
 		g.result.position.y=250
 	if g.phase=="play":
-		ui.tips.text="%s  리듬 입력   ·   %s"%[("F 위 / J 아래" if g.is_double() else str(g.preferences.values.key)),"ESC 잠시 멈춤" if g.practice else "타이밍을 맞춰 연속 콤보!"]
+		ui.tips.text="%s  리듬 입력   ·   %s"%[("F 위 / J 아래" if g.is_double() else "SPACE / F / J" if not g.ranker_id.is_empty() else str(g.preferences.values.key)),"ESC 잠시 멈춤" if g.practice else "타이밍을 맞춰 연속 콤보!"]
 	elif g.phase=="record":
-		ui.tips.text="%s  리듬 입력   ·   8개를 채운 뒤 미리듣기로 확인해봐"%("F 위 / J 아래" if g.is_double() else str(g.preferences.values.key))
+		ui.tips.text="%s  리듬 입력   ·   8개를 채운 뒤 미리듣기로 확인해봐"%("F 위 / J 아래" if g.is_double() else "SPACE / F / J" if not g.ranker_id.is_empty() else str(g.preferences.values.key))
+	if g.phase=="play" and not g.ranker_id.is_empty():ui.role.text="RANKER / %s · LV.%d"%["DOUBLE" if g.ranker_kind=="double" else "ONE BEAT",int(g.Ranker.find(g.ranker_id).level)+(2 if g.ranker_kind=="double" else 0)]
 	if g.phase=="play" and not g.map_id.is_empty():ui.role.text="MAP / %s  ·  %s"%["PRACTICE" if g.map_training else "CHALLENGE",str(g.Maps.find(g.map_id).skill)]
-	ui.key_hint.text="" if g.is_double() else str(g.preferences.values.key)
+	ui.key_hint.text="" if g.is_double() else "SPACE / F / J" if not g.ranker_id.is_empty() else str(g.preferences.values.key)
+	ui.key_hint.position.x=870;ui.key_hint.size.x=232;ui.key_hint.horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER
 	ui.key_hint.position.y=566
 	if g.phase=="play" and not mine: ui.key_hint.hide()
 	var report_ready: bool=g.phase=="result" and not g.last_report.is_empty()
@@ -359,8 +384,8 @@ func sync() -> void:
 	advance.visible=report_ready and g.practice and ((not g.solo_id.is_empty() and not g.match_finished) or (not g.map_id.is_empty() and not g.Maps.next_id(g.map_id).is_empty()))
 	advance.text="다음 맵 연습 →" if not g.map_id.is_empty() and g.map_training else "다음 맵 →" if not g.map_id.is_empty() else "다음 웨이브 →"
 	advance.disabled=not g.map_id.is_empty() and not g.map_training and not g.Maps.unlocked(g.Maps.next_id(g.map_id),g.preferences.records)
-	replay.text="같은 맵 다시 도전" if not g.map_id.is_empty() else "같은 비트 다시 도전"
-	course_back.text="맵 선택" if not g.map_id.is_empty() else "연습실로"
+	replay.text=("같은 구간 다시 연습" if g.ranker_training and (g.ranker_seek>0 or g.ranker_end>0) else "같은 곡 다시 연습" if g.ranker_training else "같은 곡 다시 도전") if not g.ranker_id.is_empty() else "같은 맵 다시 도전" if not g.map_id.is_empty() else "같은 비트 다시 도전"
+	course_back.text="랭커 아레나" if not g.ranker_id.is_empty() else "맵 선택" if not g.map_id.is_empty() else "연습실로"
 	course_back.visible=report_ready and g.practice
 	rematch.visible=report_ready and not g.practice and g.match_finished and not g.opponent_left
 	if rematch.visible:
@@ -368,13 +393,14 @@ func sync() -> void:
 		rematch.text="재대전 준비 %d / 2"%g.rematch_votes.size() if not g.rematch_votes.is_empty() else "한 판 더!  →"
 	if report_ready:
 		var r: Dictionary=g.last_report
-		score_caption.text="MAP SCORE" if not g.map_id.is_empty() else "TOTAL SCORE" if g.practice and not g.solo_id.is_empty() and g.match_finished else "ROUND SCORE"
+		score_caption.text=("PRACTICE SCORE" if g.ranker_training else "RANKER SCORE") if not g.ranker_id.is_empty() else "MAP SCORE" if not g.map_id.is_empty() else "TOTAL SCORE" if g.practice and not g.solo_id.is_empty() and g.match_finished else "ROUND SCORE"
 		g.result.position.y=175
 		g.result.add_theme_font_size_override("font_size",32)
 		g.hint.visible=false
 		g.tally.visible=not g.practice
 		grade.text=str(r.grade)
-		grade.add_theme_color_override("font_color",{"S":Color("ffd477"),"A":Color("6be8c7"),"B":Color("b79cff"),"C":Color("91c6ff"),"D":Color("ff9caa")}.get(str(r.grade),Color("b79cff")))
+		grade.add_theme_font_size_override("font_size",54 if str(r.grade).length()>1 else 82)
+		grade.add_theme_color_override("font_color",{"EX":Color("fff0af"),"SS":Color("80faff"),"F":Color("ff719b"),"S":Color("ffd477"),"A":Color("6be8c7"),"B":Color("b79cff"),"C":Color("91c6ff"),"D":Color("ff9caa")}.get(str(r.grade),Color("b79cff")))
 		medal_art.grade=str(r.grade)
 		medal_art.moving=not g.preferences.values.reduced_motion
 		var signature: String=str(r.points)+str(r.counts)+str(g.solo_wave)+str(g.turn_index)
@@ -407,9 +433,11 @@ func sync() -> void:
 		if g.practice and g.new_best: footer.text="NEW BEST!  최고 기록을 이 기기에 저장했어요." if g.preferences.persist_ok else "NEW BEST!  브라우저 저장이 차단되어 이번 창에서만 유지돼요."
 		if not g.map_id.is_empty():
 			var stars: int=g.Maps.stars(float(r.accuracy))
-			footer.text="연습 완료 · 배속/가이드 연습은 기록과 해금에 반영하지 않아요." if g.map_training else "★".repeat(stars)+"☆".repeat(3-stars)+"   ·   "+("NEW BEST!  ·  " if g.new_best else "")+("클리어! 다음 맵에 도전해봐." if stars>0 and not g.Maps.next_id(g.map_id).is_empty() else "마지막 맵 완주! 모든 별에 도전해봐." if stars>0 else "정확도 60%부터 클리어 · 느린 연습으로 먼저 익혀봐.")
+			footer.text="연습 완료 · 배속/가이드 연습은 기록과 해금에 반영하지 않아요." if g.map_training else "★".repeat(stars)+"☆".repeat(3-stars)+"   ·   "+("NEW BEST!  ·  " if g.new_best else "")+(g.Story.ending(g.map_id) if stars>0 else "정확도 60%부터 클리어 · 느린 연습으로 먼저 익혀봐.")
 			if not g.map_training and not g.preferences.persist_ok:footer.text="저장이 차단되어 기록과 해금은 이번 창에서만 유지돼요."
 
+		if not g.ranker_id.is_empty():
+			footer.text="구간 연습 완료 · 정식 기록에 반영하지 않아요." if g.ranker_training else ("NEW BEST! · " if g.new_best else "")+"%s / 엄격 판정 · 75%% 클리어 · %s"%["DOUBLE" if g.ranker_kind=="double" else "ONE BEAT",g.reward_text if not g.reward_text.is_empty() else "로컬 최고 기록 저장"]
 		ui.reward_shop.visible=not g.practice and g.match_finished
 		ui.reward_shop.position=Vector2(355,590)
 		g.next_button.position=Vector2(50,590)
@@ -421,6 +449,9 @@ func sync() -> void:
 	for i in range(course_records.size()):
 		var record: Dictionary=g.preferences.records.get(g.Challenges.record_id(str(courses[i].id)),{})
 		course_records[i].text="아직 기록이 없어요 · 첫 도전!" if record.is_empty() else "%s  %s점  ·  %.1f%%"%["★".repeat(int(record.get("stars",0))),str(record.points),float(record.accuracy)]
+	volume_slider.set_value_no_signal(float(g.preferences.values.volume))
+	music_slider.set_value_no_signal(float(g.preferences.values.music_volume))
+	offset_slider.set_value_no_signal(int(g.preferences.values.offset_ms))
 	volume_value.text="볼륨 %d%%"%int(float(g.preferences.values.volume)*100)
 	offset_value.text="입력 보정 %+.0fms   (- 빠르게 / + 늦게)"%float(g.preferences.values.offset_ms)
 	click_button.text="메트로놈 ON" if g.preferences.values.metronome else "메트로놈 OFF"
@@ -431,6 +462,8 @@ func sync() -> void:
 	if g.paused:
 		combo_label.hide()
 		precision.hide()
+	if story_hud:story_hud.sync()
+	music_value.text="곡 배경음악  %d%%"%int(float(g.preferences.values.music_volume)*100)
 
 func apply_stage_theme(active: bool) -> void:
 	if theme_ready and theme_stage_last==active: return

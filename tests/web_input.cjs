@@ -1,0 +1,11 @@
+const vm=require('vm'),fs=require('fs'),assert=require('assert');let now=100;
+const listeners={};const sandbox={window:{addEventListener(type,fn){listeners[type]=fn}},performance:{now:()=>now},Date,Set,Object};
+vm.createContext(sandbox);vm.runInContext(fs.readFileSync('tools/web_input.js','utf8'),sandbox);const input=sandbox.window.PerfectoInput;
+listeners.keydown({code:'KeyF',repeat:false,timeStamp:50});listeners.keyup({code:'KeyF',repeat:false,timeStamp:75});
+assert.equal(input.take('KeyF',true),50);assert.equal(input.take('KeyF',false),25);assert.equal(input.take('KeyF',true),0);
+listeners.keydown({code:'KeyF',repeat:true,timeStamp:80});assert.equal(input.take('KeyF',true),0);
+listeners.pointerdown({timeStamp:80});listeners.pointerdown({timeStamp:80});assert.equal(input.takePointer(true),20);assert.equal(input.takePointer(true),20);
+listeners.pointerup({timeStamp:90});input.clearPointers();assert.equal(input.takePointer(false),0);
+listeners.keydown({code:'KeyJ',timeStamp:100});now=800;listeners.keydown({code:'KeyJ',timeStamp:790});assert.equal(input.take('KeyJ',true),10,'Discard stale menu events before matching a current game press');
+for(let i=0;i<50;i++)listeners.keydown({code:'KeyF',timeStamp:790});for(let i=0;i<24;i++)assert.equal(input.take('KeyF',true),10);assert.equal(input.take('KeyF',true),0);
+console.log('WEB_INPUT_OK physical key timestamps, repeats, bounded queues, two-finger pointers, stale/menu cleanup');

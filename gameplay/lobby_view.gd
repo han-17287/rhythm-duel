@@ -42,13 +42,13 @@ func build() -> void:
 	hero.position=Vector2(638,100);hero.size=Vector2(472,492);page.add_child(hero)
 	ui.text(page,"YOUR RHYTHM. YOUR RULES.",50,183,16,Design.MINT).add_theme_font_override("font",Design.font("display"))
 	ui.text(page,"네 비트가,\n게임의 룰이 된다.",46,216,52)
-	ui.text(page,"여덟 개의 비트를 던지고, 완벽하게 받아쳐.\n친구와 겨루거나 나만의 맵 여정을 시작해봐.",50,374,18,Design.MUTED)
+	ui.text(page,"여덟 개의 비트를 던지고, 완벽하게 받아쳐.\n친구와 겨루거나 음악을 따라 스토리 여정을 시작해봐.",50,374,18,Design.MUTED)
 	tile("친구와 대전","ONLINE DUEL / 방 코드로 함께",Rect2(50,453,264,88),"battle",func():ui.page="rooms",true)
-	g.practice_button=tile("혼자하기 · 맵","12 MAPS / 나만의 여정",Rect2(330,453,248,88),"map",func():open_recommended())
+	g.practice_button=tile("스토리 모드","12 SONGS / 스토리 여정",Rect2(330,453,248,88),"map",func():open_recommended())
 	ui.profile_summary=ui.text(page,"",50,553,14,Design.MUTED)
 	var a:=tile("이어서 도전","",Rect2(50,594,336,82),"crown",func():open_recommended())
 	continue_label=ui.text(a,"",62,48,13,Design.MUTED)
-	var b:=tile("오늘의 챌린지","",Rect2(408,594,336,82),"disc",func():g.start_challenge("daily"))
+	var b:=tile("랭커 모드","",Rect2(408,594,336,82),"disc",func():ui.page="ranker")
 	daily_label=ui.text(b,"",62,48,13,Design.MUTED)
 	tile("스킨 컬렉션","새로운 노트, 새로운 분위기",Rect2(766,594,338,82),"play",func():ui.page="shop")
 	ui.text(page,"CREATE · ECHO · PERFECTO",753,562,12,Design.VIOLET).add_theme_font_override("font",Design.font("display"))
@@ -75,4 +75,4 @@ func sync() -> void:
 	progress.value=total
 	continue_label.text="MAP %s  %s"%[recommended.substr(1),str(Maps.find(recommended).name)]
 	var daily: Dictionary=g.preferences.records.get(g.Challenges.record_id("daily"),{})
-	daily_label.text="오늘의 새 비트에 도전" if daily.is_empty() else "오늘의 BEST  %.1f%%"%float(daily.accuracy)
+	daily_label.text="ONE BEAT / DOUBLE · 극한 난이도"

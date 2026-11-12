@@ -10,7 +10,7 @@ func _ready() -> void:
 	add_to_group("perfecto_art")
 	if face==null:
 		var texture: Texture2D=preload("res://assets/ui/mascot.webp")
-		face=AtlasTexture.new();face.atlas=texture;face.region=Rect2(texture.get_width()*.33,texture.get_height()*.07,texture.get_width()*.52,texture.get_height()*.43);face.filter_clip=true
+		face=AtlasTexture.new();face.atlas=texture;face.region=Rect2(texture.get_width()*.43,texture.get_height()*.005,texture.get_width()*.36,texture.get_height()*.36);face.filter_clip=true
 	art=TextureRect.new();art.expand_mode=TextureRect.EXPAND_IGNORE_SIZE;art.texture=face;var inset:=minf(7,size.x*.08);art.position=Vector2.ONE*inset;art.size=size-Vector2.ONE*inset*2;art.stretch_mode=TextureRect.STRETCH_KEEP_ASPECT_CENTERED;art.mouse_filter=Control.MOUSE_FILTER_IGNORE;add_child(art)
 func _process(delta: float) -> void:
 	if not is_visible_in_tree():return

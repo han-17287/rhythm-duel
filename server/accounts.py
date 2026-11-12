@@ -41,6 +41,7 @@ class Store:
             'CREATE TABLE IF NOT EXISTS inventory (account_id TEXT NOT NULL REFERENCES accounts(id), skin TEXT NOT NULL, PRIMARY KEY(account_id,skin))',
             'CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, account_id TEXT NOT NULL REFERENCES accounts(id), expires BIGINT NOT NULL)',
             'CREATE TABLE IF NOT EXISTS settlements (match_id TEXT PRIMARY KEY, details TEXT NOT NULL)',
+            'CREATE TABLE IF NOT EXISTS ranker_bests (account_id TEXT NOT NULL REFERENCES accounts(id), song TEXT NOT NULL, kind TEXT NOT NULL, points INTEGER NOT NULL, accuracy REAL NOT NULL, combo INTEGER NOT NULL, grade TEXT NOT NULL, cleared INTEGER NOT NULL DEFAULT 0, updated BIGINT NOT NULL, PRIMARY KEY(account_id,song,kind))',
         ]
         with self.transaction() as db:
             for sql in statements: db.execute(sql)
@@ -127,3 +128,26 @@ class Store:
                 changes[uid]={'coins':coins,'rating':rating_delta,'profile':self.profile(uid,db)}
             db.execute('UPDATE settlements SET details=? WHERE match_id=?',(json.dumps(changes),match_id))
             return changes
+
+    def ranker_submit(self,uid,song,kind,report):
+        with self.transaction() as db:
+            # Serialize both reward and best-score updates on the account row.
+            suffix=' FOR UPDATE' if self.url else ''
+            db.execute('SELECT id FROM accounts WHERE id=?'+suffix,(uid,)).fetchone()
+            old=db.execute('SELECT * FROM ranker_bests WHERE account_id=? AND song=? AND kind=?',(uid,song,kind)).fetchone()
+            cleared=report['accuracy']>=75
+            reward=40 if cleared and (old is None or not old['cleared']) else 0
+            better=old is None or (report['points'],report['max_combo'])>(old['points'],old['combo'])
+            if better:
+                db.execute('INSERT INTO ranker_bests(account_id,song,kind,points,accuracy,combo,grade,cleared,updated) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(account_id,song,kind) DO UPDATE SET points=excluded.points,accuracy=excluded.accuracy,combo=excluded.combo,grade=excluded.grade,cleared=excluded.cleared,updated=excluded.updated',
+                           (uid,song,kind,report['points'],report['accuracy'],report['max_combo'],report['grade'],int(cleared or bool(old and old['cleared'])),int(time.time())))
+            elif cleared and old and not old['cleared']:
+                db.execute('UPDATE ranker_bests SET cleared=1 WHERE account_id=? AND song=? AND kind=?',(uid,song,kind))
+            if reward:db.execute('UPDATE accounts SET coins=coins+? WHERE id=?',(reward,uid))
+            return dict(best=better,coins=reward,profile=self.profile(uid,db))
+
+    def ranker_board(self,song,kind,uid=None):
+        with self.transaction() as db:
+            rows=db.execute('SELECT a.name,b.points,b.accuracy,b.combo,b.grade FROM ranker_bests b JOIN accounts a ON a.id=b.account_id WHERE b.song=? AND b.kind=? ORDER BY b.points DESC,b.combo DESC,b.updated ASC,a.name ASC LIMIT 20',(song,kind)).fetchall()
+            own=db.execute('SELECT points,accuracy,combo,grade FROM ranker_bests WHERE account_id=? AND song=? AND kind=?',(uid,song,kind)).fetchone() if uid else None
+            return dict(rows=[dict(row) for row in rows],own=dict(own) if own else None)

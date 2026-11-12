@@ -29,6 +29,9 @@ var tips: Label
 var key_hint: Label
 var account_button: Button
 var profile_summary: Label
+var auth_login:Button
+var auth_register:Button
+var auth_session:Button
 var auth_notice: Label
 var shop_balance: Label
 var name_edit: LineEdit
@@ -150,7 +153,7 @@ func selector(parent: Node, rect: Rect2, values: Array) -> OptionButton:
 	var o := OptionButton.new()
 	o.position = rect.position
 	o.size = rect.size
-	o.focus_mode = Control.FOCUS_NONE
+	o.focus_mode = Control.FOCUS_ALL
 	o.add_theme_font_size_override("font_size",17)
 	o.add_theme_color_override("font_color",INK)
 	o.add_theme_color_override("font_hover_color",INK)
@@ -158,6 +161,7 @@ func selector(parent: Node, rect: Rect2, values: Array) -> OptionButton:
 	o.add_theme_color_override("font_disabled_color",MUTED)
 	o.add_theme_constant_override("modulate_arrow",1)
 	var popup := o.get_popup()
+	popup.about_to_popup.connect(func():popup.set_focused_item(o.selected))
 	popup.max_size=Vector2i(0,250)
 	popup.add_theme_color_override("font_color",INK)
 	popup.add_theme_color_override("font_hover_color",INK)
@@ -190,6 +194,7 @@ func nav_button(value: String, rect: Rect2, destination: String) -> Button:
 	b.add_to_group("perfecto_menu_nav")
 	b.set_meta("menu_action",destination)
 	b.set_meta("route",destination)
+	b.add_theme_font_size_override("font_size",16)
 	return b
 
 func icon_button(kind: String, caption: String, rect: Rect2, action: Callable) -> Button:
@@ -208,10 +213,11 @@ func build() -> void:
 	g.title = text(g,"PERFECTO",48,20,28,MINT)
 	g.title.add_theme_font_override("font",Design.font("display"))
 	text(g,"R H Y T H M   D U E L",50,59,10,MUTED)
-	nav_button("로비",Rect2(255,24,108,44),"home")
-	nav_button("대전",Rect2(380,24,108,44),"rooms")
-	nav_button("맵 여정",Rect2(505,24,108,44),"solo")
-	nav_button("컬렉션",Rect2(630,24,108,44),"shop")
+	nav_button("로비",Rect2(255,24,88,44),"home")
+	nav_button("대전",Rect2(353,24,88,44),"rooms")
+	nav_button("스토리",Rect2(451,24,88,44),"solo")
+	nav_button("랭커",Rect2(549,24,88,44),"ranker")
+	nav_button("컬렉션",Rect2(647,24,88,44),"shop")
 	account_button = nav_button("",Rect2(770,24,230,44),"auth")
 	var badge=preload("res://gameplay/player_badge.gd").new();badge.position=Vector2(7,6);badge.size=Vector2(32,32);account_button.add_child(badge)
 	account_name=text(account_button,"로그인 / 가입",48,3,13)
@@ -229,7 +235,7 @@ func build() -> void:
 	budget = text(g,"",50,321,15,MINT)
 	key_hint = text(g,"SPACE",932,555,19,INK)
 	tips = text(g,"SPACE  리듬 입력     ·     TAP  짧게 누르기     ·     HOLD  끝까지 유지",50,630,16,MUTED)
-	main_exit=button(g,"메인으로",Rect2(964,642,140,44),func(): g.open_menu("solo" if not g.map_id.is_empty() else "home"))
+	main_exit=button(g,"메인으로",Rect2(964,642,140,44),func(): g.open_menu("ranker" if not g.ranker_id.is_empty() else "solo" if not g.map_id.is_empty() else "home"))
 	g.next_button = button(g,"다음 공수 시작  →",Rect2(50,455,280,64),func():
 		if g.practice: g.start_practice(g.is_double())
 		else: g.send_packet({"type":"next"})
@@ -297,12 +303,14 @@ func build() -> void:
 	password_edit = edit(login_card,"8자 이상",Rect2(24,151,598,55))
 	password_edit.secret = true
 	password_edit.max_length = 128
-	button(login_card,"로그인",Rect2(24,238,284,60),func(): submit_auth("login"),true)
-	button(login_card,"새 계정 만들기",Rect2(326,238,296,60),func(): submit_auth("register"))
+	auth_login=button(login_card,"로그인",Rect2(24,238,284,60),func(): submit_auth("login"),true)
+	auth_register=button(login_card,"새 계정 만들기",Rect2(326,238,296,60),func(): submit_auth("register"))
 	var p := card(auth,Rect2(720,239,384,350),Color("9e7bdb"))
 	text(p,"YOUR PLAYER CARD",24,24,15,PURPLE)
 	auth_notice = text(p,"게스트로도 친구 대전이 가능해요.",24,83,17,MUTED)
-	button(p,"로그아웃",Rect2(24,262,336,55),func(): g.account_action("logout"))
+	auth_session=button(p,"",Rect2(24,262,336,55),func():
+		if g.profile.is_empty():page="home"
+		else:g.account_action("logout"))
 	text(auth,"비밀번호 대신 로그인 토큰만 이 기기에 저장합니다. 공용 PC에서는 로그아웃하세요.",50,612,14,MUTED)
 
 	shop = group()
@@ -415,11 +423,14 @@ func sync(delta := 0.0) -> void:
 	else: role.text = "상대의 리듬을 기다리는 중…"
 	g.result.position.y = 250 if in_game else 270
 	g.hint.position.y = 580 if in_game else 360
+	auth_login.disabled=not g.accounts_enabled or not g.connected
+	auth_register.disabled=auth_login.disabled
+	auth_session.text="게스트로 계속" if g.profile.is_empty() else "로그아웃"
 	if g.profile.is_empty():
 		account_name.text = "로그인 / 가입"
 		account_wallet.text="게스트로 플레이 중"
 		profile_summary.text = "게스트로 바로 시작 · 로그인하면 보상과 전적 저장"
-		auth_notice.text = "가입하면 레이팅과 스킨을\n계정에 모아둘 수 있어요." if g.accounts_enabled else "계정 저장소 준비 중이에요.\n지금은 게스트 대전을 즐겨요."
+		auth_notice.text = "가입하면 레이팅과 스킨을\n계정에 모아둘 수 있어요." if g.accounts_enabled else "온라인 계정은 준비 중이에요.\n지금은 게스트로 플레이해요."
 		shop_balance.text = "로그인하고 대전 보상으로 스킨을 모아보세요."
 	else:
 		account_name.text = str(g.profile.name).left(10)+( "…" if str(g.profile.name).length()>10 else "")

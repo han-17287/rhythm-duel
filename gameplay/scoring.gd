@@ -3,10 +3,19 @@ extends RefCounted
 const WINDOWS = [0.035,0.08,0.18]
 const POINTS = [1000,700,400,0]
 
-static func judgment(error: float) -> int:
-	return 0 if error<=WINDOWS[0]+0.000001 else 1 if error<=WINDOWS[1]+0.000001 else 2 if error<=WINDOWS[2]+0.000001 else 3
+static func judgment(error: float, windows := WINDOWS) -> int:
+	return 0 if error<=windows[0]+0.000001 else 1 if error<=windows[1]+0.000001 else 2 if error<=windows[2]+0.000001 else 3
 
-static func analyze(notes: Array, hits: Array) -> Dictionary:
+static func analyze(notes: Array, hits: Array, windows := WINDOWS, chronological := false) -> Dictionary:
+	var assignment:Dictionary={}
+	if chronological:
+		var order:Array=range(hits.size())
+		order.sort_custom(func(a,b):return float(hits[a].t)<float(hits[b].t) or (hits[a].t==hits[b].t and a<b))
+		for hit_index in order:
+			for note_index in range(notes.size()):
+				if assignment.has(note_index) or int(notes[note_index].get("lane",0))!=int(hits[hit_index].get("lane",0)):continue
+				if absf(float(hits[hit_index].t)-float(notes[note_index].t))<=float(windows[2])+.000001:
+					assignment[note_index]=hit_index;break
 	var used: Dictionary = {}
 	var events: Array = []
 	var points := 0
@@ -16,18 +25,23 @@ static func analyze(notes: Array, hits: Array) -> Dictionary:
 	var counts := [0,0,0,0]
 	var outcomes: Array = []
 	var offsets: Array = []
-	for note in notes:
+	for note_index in range(notes.size()):
+		var note:Dictionary=notes[note_index]
 		var best := -1
 		var best_error := INF
-		for i in range(hits.size()):
-			if used.has(i) or int(hits[i].get("lane",0))!=int(note.get("lane",0)): continue
-			var error := absf(float(hits[i].t)-float(note.t))
-			if error<best_error:
-				best_error = error
-				best = i
+		if chronological:
+			best=int(assignment.get(note_index,-1))
+			if best>=0:best_error=absf(float(hits[best].t)-float(note.t))
+		else:
+			for i in range(hits.size()):
+				if used.has(i) or int(hits[i].get("lane",0))!=int(note.get("lane",0)): continue
+				var error := absf(float(hits[i].t)-float(note.t))
+				if error<best_error:
+					best_error = error
+					best = i
 		var signed_error = null
 		var error := INF
-		if best>=0 and best_error<=0.180001:
+		if best>=0 and best_error<=float(windows[2])+.000001:
 			used[best] = true
 			signed_error = float(hits[best].t)-float(note.t)
 			error = best_error
@@ -35,7 +49,7 @@ static func analyze(notes: Array, hits: Array) -> Dictionary:
 				var release_offset := float(hits[best].t)+float(hits[best].d)-float(note.t)-float(note.d)
 				if absf(release_offset)>absf(float(signed_error)): signed_error=release_offset
 				error = maxf(error,absf(release_offset))
-		var j := judgment(error)
+		var j := judgment(error,windows)
 		var weight := maxi(1,ceili(float(note.d)))
 		points += POINTS[j]*weight
 		maximum += 1000*weight

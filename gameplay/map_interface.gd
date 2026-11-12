@@ -30,6 +30,7 @@ var guide_button: Button
 var speed_select: OptionButton
 var speeds: Array=[.5,.75,1.0,1.25]
 var guide:=true
+var song_name: Label
 var stage_caption: Label
 var styles: Dictionary={}
 var world:=0
@@ -49,8 +50,8 @@ func shade(parent: Node,rect: Rect2,color: Color) -> void:
 	var node:=ColorRect.new();node.position=rect.position;node.size=rect.size;node.color=color;node.mouse_filter=Control.MOUSE_FILTER_IGNORE;parent.add_child(node)
 func build() -> void:
 	page=ui.group()
-	ui.text(page,"SOLO / RHYTHM JOURNEY",50,122,12,Design.MINT).add_theme_font_override("font",Design.font("display"))
-	headline=ui.text(page,"맵 여정",48,148,36)
+	ui.text(page,"STORY / RESTORE THE RHYTHM",50,122,12,Design.MINT).add_theme_font_override("font",Design.font("display"))
+	headline=ui.text(page,"스토리 모드",48,148,36)
 	ui.button(page,"더블 비트 F / J",Rect2(464,148,202,46),g.start_double_training)
 	ui.button(page,"아케이드 코스",Rect2(678,148,202,46),func():ui.page="arcade")
 	ui.button(page,"내 비트 보관함",Rect2(896,148,208,46),g.open_library)
@@ -90,6 +91,7 @@ func build() -> void:
 	title=ui.text(detail,"",20,41,25);title.add_theme_font_override("font",Design.font("headline"))
 	description=ui.text(detail,"",20,84,14,Design.MUTED)
 	facts=ui.text(detail,"",20,140,13,Design.VIOLET)
+	song_name=ui.text(detail,"",20,162,11,Design.MINT)
 	preview=preload("res://gameplay/pattern_preview.gd").new();preview.position=Vector2(20,178);preview.size=Vector2(296,32);detail.add_child(preview)
 	record=ui.text(detail,"",20,222,17,Design.MINT)
 	notice=ui.text(detail,"",20,255,12,Design.MUTED)
@@ -110,7 +112,7 @@ func build() -> void:
 		styles[key]=style
 func select_world(index: int) -> void:selected=str(Maps.catalog()[clampi(index,0,2)*4].id)
 func handle_input(event: InputEventKey) -> bool:
-	if not page.visible or not event.pressed or speed_select.get_popup().visible:return false
+	if ui.page!="solo" or not page.visible or not event.pressed or speed_select.get_popup().visible:return false
 	var index:=int(selected.substr(1))-1
 	var change:=0
 	match event.keycode:
@@ -129,13 +131,13 @@ func handle_input(event: InputEventKey) -> bool:
 	return false
 func sync() -> void:
 	ui.reveal(page,g.phase=="lobby" and ui.page=="solo")
-	stage_caption.visible=g.phase=="play" and not g.map_id.is_empty() and not g.paused
+	stage_caption.visible=g.phase=="play" and not g.map_id.is_empty() and not g.paused and g.play_time()>=0
 	if stage_caption.visible:
 		var data: Dictionary=Maps.find(g.map_id)
-		var time: float=maxf(0,g.input_time())
+		var time: float=maxf(0,g.play_time())
 		var bar:=mini(int(data.bars),int(time/(60.0/float(data.bpm)*4))+1)
 		var section:=mini(3,int(float(bar-1)/float(data.bars)*4))
-		stage_caption.text="%s  ·  %d / %d 마디  ·  %s"%[["INTRO","GROOVE","BRIDGE","FINALE"][section],bar,int(data.bars),"가이드와 함께 연습" if g.map_training and g.map_guide else "목표 정확도 60% · 끝까지 완주해봐"]
+		stage_caption.text="♪ %s  ·  %s  ·  %d / %d 마디"%[g.Story.title(g.map_id),["INTRO","GROOVE","BRIDGE","FINALE"][section],bar,int(data.bars)]
 	if not page.visible:signature="";return
 	guide_button.text="가이드 ON" if guide else "가이드 OFF"
 	var key:=selected+str(g.preferences.records.hash())
@@ -147,7 +149,7 @@ func sync() -> void:
 	world_title.text="WORLD %02d / %s"%[world+1,WORLD_TAGS[world]]
 	world_title.add_theme_color_override("font_color",COLORS[world])
 	var total:=Maps.total_stars(g.preferences.records)
-	headline.text="맵 여정   ·   ★ %d / 36"%total
+	headline.text="스토리   ·   ★ %d / 36"%total
 	var all:=Maps.catalog()
 	for w in range(3):
 		var earned:=0;var clears:=0
@@ -159,12 +161,15 @@ func sync() -> void:
 	var notes:=Maps.chart(selected);var available:=Maps.unlocked(selected,g.preferences.records)
 	tag.text="MAP %02d  /  LV.%d  /  %s"%[int(selected.substr(1)),int(data.level),"BOSS" if int(selected.substr(1))%4==0 else "CHALLENGE"]
 	title.text=str(data.name);description.text=str(data.description)
-	facts.text="%d BPM  ·  %d초  ·  %d NOTES"%[int(data.bpm),ceili(float(notes[-1].t)+float(notes[-1].d)),notes.size()]
+	description.tooltip_text="\n".join(g.Story.intro(selected))
+	facts.text="%d BPM  ·  %d초  ·  %d NOTES"%[int(data.bpm),ceili(float(data.bars)*4*60.0/float(data.bpm)),notes.size()]
+	song_name.text="♪ "+g.Story.title(selected)+" / ORIGINAL"
 	preview.notes=notes;preview.queue_redraw()
+	preview.tooltip_text="♪ "+g.Story.title(selected)+" · 멜로디에 맞춰 연주하세요"
 	var best: Dictionary=g.preferences.records.get(Maps.record_id(selected),{})
 	record.text="☆☆☆  첫 클리어에 도전" if best.is_empty() else "★".repeat(int(best.stars))+"☆".repeat(3-int(best.stars))+"  BEST %.1f%%"%float(best.accuracy)
 	notice.text="ENTER · 1.0배 정식 도전" if available else "이전 맵을 ★ 1개로 클리어해 열어봐."
-	play_button.disabled=not available;play_button.text="맵 시작" if available else "잠긴 맵"
+	play_button.disabled=not available;play_button.text="스토리 시작" if available else "잠긴 맵"
 	for i in range(all.size()):
 		var item: Dictionary=all[i];nodes[i].visible=int(item.region)==world
 		var earned:=int(g.preferences.records.get(Maps.record_id(item.id),{}).get("stars",0));var opened:=Maps.unlocked(item.id,g.preferences.records)

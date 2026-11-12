@@ -1,0 +1,11 @@
+PERFECTO UI, 2026-11-11
+
+A subset of Noto Sans KR (Google Fonts, SIL Open Font License 1.1).
+Original source: https://github.com/google/fonts/tree/main/ofl/notosanskr
+Copyright and license: OFL.txt in this directory.
+
+This modified font is renamed PERFECTO UI. It retains all modern Hangul
+syllables and Jamo, Latin letters, and commonly used UI symbols, including
+punctuation and arrows. Original weight variation is retained; the font is losslessly compressed as WOFF2. No outlines
+were redrawn. Regenerate with tools/subset_ui_font.py and an original
+NotoSansKR[wght].ttf source file. FontTools and Brotli are developer-only dependencies.
