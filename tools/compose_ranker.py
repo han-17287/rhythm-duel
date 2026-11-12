@@ -1,8 +1,9 @@
-"""Original phrase-based rhythm charts and electronic soundtrack (numpy/ffmpeg)."""
+"""Original phrase-based charts and sampled-instrument ensemble arrangements."""
 import argparse
 import json
 from pathlib import Path
 from ranker_charts import build_arrangement
+from ranker_soundtrack import PROFILES
 
 ROOT = Path(__file__).resolve().parents[1]
 SONGS = [
@@ -39,9 +40,10 @@ def main():
     catalog = []
     for song in SONGS:
         data = {**song, **chart(song)}
+        data.update(audio_revision=3,genre=PROFILES[song['id']]['genre'],subtitle=PROFILES[song['id']]['subtitle'])
         data['difficulty_levels'] = {tier: song['level'] + offset for tier, offset in [('hard', 0), ('expert', 3), ('inferno', 6)]}
         if not args.charts_only:
-            render(song, data, folder / (song['id'] + '.ogg'))
+            data['audio_render']=render(song, data, folder / (song['id'] + '.ogg'))
         catalog.append(data)
         print(song['id'], data['duration'], {tier: {kind: len(notes) for kind, notes in variants.items()}
               for tier, variants in [('hard', data['charts']), *data['extras'].items()]}, flush=True)

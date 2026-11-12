@@ -52,7 +52,7 @@ var board_at:=-10.0
 func _init(game:Control,base:RefCounted)->void:game_ref=weakref(game);ui_ref=weakref(base)
 func build()->void:
 	page=ui.group()
-	ui.text(page,"RHYTHM RE:FORM / NEW ARRANGEMENT",50,123,12,Design.MINT).add_theme_font_override("font",Design.font("display"))
+	ui.text(page,"ENSEMBLE / PLAY THE INSTRUMENTS",50,123,12,Design.MINT).add_theme_font_override("font",Design.font("display"))
 	ui.text(page,"RANKER ARENA",48,149,38).add_theme_font_override("font",Design.font("display"))
 	power=ui.text(page,"",50,203,14,Design.MUTED)
 	for i in range(2):
@@ -236,7 +236,8 @@ func sync()->void:
 	if scroll_select.selected!=scroll_index:scroll_select.select(scroll_index)
 	var song:=Ranker.find(selected)
 	title.text=str(song.title);title.add_theme_color_override("font_color",Color(str(song.color)))
-	subtitle.text="%s / %s / %s / LV.%d"%[str(song.subtitle),difficulty.to_upper(),"DOUBLE" if kind=="double" else "ONE BEAT",Ranker.level(selected,kind,difficulty)]
+	subtitle.text=str(song.subtitle)
+	subtitle.tooltip_text="%s · %s / %s / LV.%d"%[str(song.get("genre","")),difficulty.to_upper(),"DOUBLE" if kind=="double" else "ONE BEAT",Ranker.level(selected,kind,difficulty)]
 	var duration:=ceili(float(song.duration))
 	facts.text="%d → %d BPM · %d:%02d · %d NOTES"%[int(song.bpms[0]),int(song.bpms.max()),duration/60,duration%60,Ranker.source_chart(selected,kind,difficulty).size()]
 	var bounds:=preview_bounds(song)

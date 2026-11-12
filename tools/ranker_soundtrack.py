@@ -1,249 +1,197 @@
-"""Original electronic Ranker soundtrack synthesis (developer regeneration only).
+"""Original sampled-instrument arrangements. Development-only FluidSynth renderer.
 
-All instruments, motifs and effects are generated here.  Chart timestamps and
-bar boundaries remain the single musical clock; no external samples are used.
+Foreground onsets come directly from the playable score. Accompaniment, harmony,
+phrasing and GM instruments differ by song; no external melodies are copied.
+Requires libfluidsynth, numpy, ffmpeg and the MIT-licensed FluidR3_GM SoundFont.
+Set RANKER_SOUNDFONT to its path. Finished Oggs need none of these at runtime.
 """
+import ctypes as C
+import ctypes.util
+import hashlib
 import math
+import os
+from pathlib import Path
 import subprocess
 import tempfile
 import wave
-from pathlib import Path
-import numpy as np
 
-RATE = 22050
+RATE=44100
+PROFILES={
+ 'r01':dict(genre='PIANO FUSION',subtitle='피아노 · 어쿠스틱 드럼 · 클린 기타',programs=[0,26,11,48,33],key=57,scale=[0,2,3,5,7,9,10],progression=[0,5,3,4,0,2,5,4],motif=[0,2,4,6,5,2,1,4],drums='fusion'),
+ 'r02':dict(genre='GUITAR ROCK',subtitle='일렉 기타 · 록 드럼 · 피아노',programs=[30,0,29,48,34,0],key=52,scale=[0,2,3,5,7,8,10],progression=[0,0,5,3,0,6,3,4],motif=[0,4,7,4,3,2,0,-1],drums='rock'),
+ 'r03':dict(genre='VIOLIN CHAMBER',subtitle='바이올린 · 피아노 · 피치카토',programs=[40,0,45,42,43],key=62,scale=[0,2,3,5,7,8,11],progression=[0,3,5,1,4,0,3,4],motif=[4,5,7,6,4,2,3,1],drums='chamber'),
+ 'r04':dict(genre='SYMPHONIC ROCK',subtitle='피아노 · 바이올린 · 기타 · 드럼',programs=[0,40,30,48,34,40],key=54,scale=[0,2,3,5,7,8,11],progression=[0,5,3,4,0,2,5,4],motif=[0,7,4,5,2,6,4,1],drums='symphonic'),
+}
+
+def pitch(profile,degree,octave=0):
+    return profile['key']+profile['scale'][degree%7]+12*(degree//7+octave)
 
 
-def render(song, data, path):
-    """Render the shared authored score on its canonical musical clock."""
-    preroll = data['audio_offset']
-    duration = data['duration'] + preroll
-    mix = np.zeros((math.ceil(duration * RATE), 2), dtype=np.float64)
-    rng = np.random.default_rng(8172 + int(song['id'][1:]))
-    root, voice = song['root'], song['voice']
+def arrange(song,data):
+    """Return one canonical performance used by rendering and onset-contract tests.
 
-    def add(at, sound, gain, pan=0):
-        start = round((at + preroll) * RATE)
-        if start < 0:
-            return
-        n = min(len(sound), len(mix) - start)
-        pan = max(-1, min(1, pan))
-        if n > 0:
-            mix[start:start+n, 0] += sound[:n] * gain * math.sqrt((1-pan)/2)
-            mix[start:start+n, 1] += sound[:n] * gain * math.sqrt((1+pan)/2)
-
-    def pump(sound, beat, depth=.5):
-        """Beat-aligned sidechain shape, leaving space for the kick transient."""
-        phase = (np.arange(len(sound)) / RATE) % beat
-        # Fade into the next duck just before the beat to avoid a gain step.
-        duck = np.minimum(1, np.exp(-phase/(beat*.15))+np.exp(-(beat-phase)/.003))
-        return sound * (1-depth*duck)
-
-    def tone(midi, length, kind='lead', bright=1):
-        t = np.arange(max(1, round(length*RATE))) / RATE
-        f = 440 * 2**((midi-69)/12)
-        release = np.minimum(np.maximum(length-t, 0)/min(.04, length*.3), 1)
-        attack = np.minimum(t/(.055 if kind == 'pad' else .0025), 1)
-        phase = 2*np.pi*f*t
-        if kind == 'bass':
-            # Round sub stays centered; upper FM body is audible on small speakers.
-            sub = np.sin(phase)
-            body = np.sin(phase*2 + (1.7 if voice == 'glitch' else .9)*np.sin(phase)*np.exp(-t*9))
-            bite = .11*np.sin(phase*3)*np.exp(-t*13)
-            return (sub + .31*body + bite)*attack*release*np.exp(-t*5.2)
-        if kind == 'pad':
-            signal = (np.sin(phase*.9985)+np.sin(phase*1.0015)+.2*np.sin(phase*2))/2.2
-            return signal*attack*release
-        # A pitched hammer transient gives every melody onset a crisp timing cue.
-        piano = np.sin(phase)*np.exp(-t*4.8)
-        for harmonic in [2, 3, 4, 6]:
-            if f*harmonic < RATE*.45:
-                piano += .42/harmonic*np.sin(phase*(harmonic+.001*harmonic**2))*np.exp(-t*(5+harmonic*2))
-        if kind == 'piano':
-            return piano*attack*release
-        if kind == 'bell':
-            bell = .75*np.sin(phase)*np.exp(-t*7)
-            if f*2.003 < RATE*.45:
-                bell += .23*np.sin(phase*2.003)*np.exp(-t*12)
-            if f*4.01 < RATE*.45:
-                bell += .09*np.sin(phase*4.01)*np.exp(-t*20)
-            return bell*attack*release
-        # A band-limited three-voice unison is brighter than the original sine lead.
-        signal = np.zeros(len(t))
-        rolloff = 1.27 if voice in ('anthem', 'finale') else 1.42
-        for harmonic in range(1, 9):
-            if f*harmonic < RATE*.44:
-                partial = (np.sin(phase*harmonic*.9978)+np.sin(phase*harmonic)+np.sin(phase*harmonic*1.0022))/3
-                signal += partial/harmonic**rolloff*np.exp(-t*(2.5+harmonic*bright*1.1))
-        if voice == 'glitch':
-            signal = signal*.82 + .16*np.sin(phase + 1.1*np.sin(phase*2)*np.exp(-t*22))
-        elif voice == 'orbit':
-            signal *= .78
-            piano *= 1.18
-        return (signal*.78+piano*.32)*attack*release
-
-    def drum(kind):
-        length = {'kick':.29, 'snare':.19, 'hat':.04, 'open':.13,
-                  'crash':.90, 'tom':.15, 'impact':.75}[kind]
-        t = np.arange(round(length*RATE))/RATE
-        envelope = np.minimum(t/.0008, 1)
-        if kind == 'kick':
-            pitch = 45*t + 115*.017*(1-np.exp(-t/.017))
-            body = np.sin(2*np.pi*pitch)*np.exp(-t*17)
-            click = .13*rng.uniform(-1, 1, len(t))*np.exp(-t*230)
-            return (body+click)*envelope
-        if kind == 'tom':
-            return np.sin(2*np.pi*(91*t+29*.025*(1-np.exp(-t/.025))))*np.exp(-t*24)*envelope
-        if kind == 'impact':
-            sub = np.sin(2*np.pi*(36*t+35*.08*(1-np.exp(-t/.08))))*np.exp(-t*7)
-            return sub*envelope
-        noise = rng.uniform(-1, 1, len(t))
-        high = np.concatenate(([0], np.diff(noise)))*.5
-        if kind == 'snare':
-            # Body + staggered clap pulses; stronger midrange without brittle treble.
-            clap = np.zeros(len(t))
-            for at, strength in [(0, 1), (.011, .58), (.023, .38)]:
-                shifted = np.maximum(t-at, 0)
-                clap += strength*high*np.exp(-shifted*43)*(t >= at)
-            body = .30*np.sin(2*np.pi*184*t)*np.exp(-t*34)
-            return (.60*clap+body)*envelope
-        decay = 120 if kind == 'hat' else 31 if kind == 'open' else 5
-        return high*np.exp(-t*decay)*envelope
-
-    drums = {kind:drum(kind) for kind in ['kick', 'snare', 'hat', 'open', 'crash', 'tom', 'impact']}
-    for count in range(4):
-        t = np.arange(round(.045*RATE))/RATE
-        click = np.sin(2*np.pi*(1320 if count == 0 else 990)*t)*np.exp(-t*75)*np.minimum(t/.002, 1)
-        add(-preroll+count*60/song['bpms'][0], click, .18)
-
-    scales = {'anthem':[0, 2, 3, 5, 7, 8, 10, 12],
-              'glitch':[0, 1, 3, 5, 7, 8, 10, 12],
-              'orbit':[0, 2, 3, 5, 7, 9, 10, 12],
-              'finale':[0, 2, 3, 5, 7, 8, 11, 12]}
-    scale = scales[voice]
-    progression = [0, 5, 2, 6, 0, 3, 5, 6]
-    bar_for_note = []
-    for i, bar in enumerate(data['bars']):
-        local = i % song['section_bars']
-        section, beat = bar['section'], 60/bar['bpm']
-        bar_length = bar['beats']*beat
-        degree = progression[(i//2) % 8] if i < len(data['bars'])-2 else 0
-        chord = root+scale[degree]-(12 if degree >= 4 else 0)
-        intervals = [scale[(degree+step) % 7]+12*((degree+step)//7)-scale[degree] for step in [0, 2, 4, 6]]
-        breakdown, intro = section == 2 and local < 8, section == 0 and local < 4
-        energy = [.76, 1.03, .94, 1.15][section]
-        if breakdown:
-            energy = .32
-        elif intro:
-            energy = .45+local*.08
-        build = section < 3 and local >= song['section_bars']-4
-        phrase_rest = local % 8 == 7
-        for step in range(bar['beats']):
-            if phrase_rest and step == bar['beats'] - 1:
-                continue
-            at = bar['t']+step*beat
-            if not breakdown or step == 0:
-                add(at, drums['kick'], .45*energy)
-            if step % 2 and not intro:
-                add(at, drums['snare'], .29*energy, .06)
-            bass = tone(chord-12+(intervals[2] if step == 3 else 0), beat*.72, 'bass')
-            add(at, pump(bass, beat, .30), .27*energy)
-            if not breakdown:
-                add(at+.5*beat, tone(chord-12, beat*.30, 'bass'), .14*energy)
-                # Answering bass syncopations make the high-energy profiles groove.
-                if section in (1, 3) and step % 2 and voice in ('glitch', 'finale'):
-                    add(at+.75*beat, tone(chord-12, beat*.19, 'bass'), .07*energy)
-            for half in range(2):
-                add(at+half*.5*beat, drums['hat'], .059*energy, -.42 if half else .42)
-            if not breakdown and section > 0:
-                add(at+.5*beat, drums['open'], .027*energy, .32)
-            if section == 3 and step % 2 == 0:
-                add(at+.25*beat, drums['hat'], .025*energy, -.35)
-                add(at+.75*beat, drums['hat'], .025*energy, .35)
-        # Diatonic sevenths, voiced around the melody rather than transposed minor chords.
-        for interval in intervals:
-            pad = tone(chord+interval, (bar_length-beat if phrase_rest else bar_length*.94), 'pad')
-            add(bar['t'], pump(pad, beat, 0 if breakdown else .53), .040*energy, (interval-5)*.085)
-        if i % 8 == 0 and not intro:
-            add(bar['t'], drums['crash'], .17*energy, -.30)
-        if local == 0 and section in (1, 3):
-            add(bar['t'], drums['impact'], .24, 0)
-            add(bar['t']+.02, drums['crash'], .16, .35)
-        if i % 8 == 6 and not breakdown:
-            for fill in range(4):
-                add(bar['t']+bar_length-(4-fill)*beat*.25, drums['snare'], (.035+fill*.015)*energy, (fill-1.5)*.20)
-            if voice in ('glitch', 'finale'):
-                for fill in range(3):
-                    add(bar['t']+bar_length-(3-fill)*beat/3, drums['tom'], .08*energy, -.3+fill*.3)
-        # A four-bar build grows towards the tempo boundary; the downbeat impact resolves it.
-        if build and not phrase_rest:
-            progress = (local-(song['section_bars']-4))/4
-            subdivisions = 4 if progress >= .5 else 2
-            for pulse in range(bar['beats']*subdivisions):
-                add(bar['t']+pulse*beat/subdivisions, drums['snare'], (.014+.025*progress)*(1+pulse/(bar['beats']*subdivisions)), -.16 if pulse % 2 else .16)
-            t = np.arange(round(bar_length*RATE))/RATE
-            u = t/bar_length
-            sweep = np.sin(2*np.pi*((220+progress*330)*t+400*t*t/bar_length))*.22
-            noise = rng.uniform(-1, 1, len(t))
-            noise = np.concatenate(([0], np.diff(noise)))*.22
-            add(bar['t'], (sweep+noise)*(progress*.55+u*.35)**2*np.minimum((bar_length-t)/.02, 1), .10, .25)
-        bar_for_note.append((bar, energy, breakdown, chord))
-
-    # The score is the source of BOTH sound and all playable arrangements.
-    # Its foreground hook, answering piano and brief sparkling ornaments have
-    # distinct timbres and intentional dynamics, never a quiet union-of-charts.
-    bar_index = 0
-    score = data['score']
-    for i, note in enumerate(score):
-        while bar_index + 1 < len(data['bars']) and data['bars'][bar_index + 1]['t'] <= note['t'] + .00001:
-            bar_index += 1
-        bar, energy, breakdown, chord = bar_for_note[bar_index]
-        beat = 60 / bar['bpm']
-        layer = note['voice']
-        degree = note['degree']
-        midi = root + 12 + scale[degree % 7] + 12 * (degree // 7)
-        if layer == 'spark':
-            midi += 12
-        if bar['section'] == 3 and layer == 'lead' and bar_index % 8 >= 4:
-            midi += 12
-        held = note['d'] >= .3
-        length = note['d'] if held else min(.19, beat * .6)
-        pan = (-.16 if note['hand'] == 0 else .16) if layer == 'lead' else (-.45 if note['hand'] == 0 else .45)
-        accent = 1.12 if note['accent'] else .92
-        if layer == 'lead':
-            instrument = 'piano' if breakdown or voice == 'orbit' and bar['section'] == 0 else 'lead'
-            gain = (.32 if breakdown else .30) * accent
-        elif layer == 'reply':
-            instrument, gain = ('bell' if voice == 'orbit' else 'piano'), .23 * accent
-            length = min(.15, beat * .48)
-        elif layer == 'spark':
-            instrument, gain = 'bell', .16 * accent
-            length = min(.10, beat * .3)
+    Each note records its source ('score' or 'backing'), instrument and exact
+    chart-relative time. GM programs are zero-based; channel 9 is acoustic drums.
+    """
+    p=PROFILES[song['id']];bars=data['bars'];events=[]
+    def add(t,d,ch,n,v,source='backing',score_index=-1):
+        if t>=data['duration'] or d<=0:return
+        events.append(dict(t=round(t,5),d=round(min(d,data['duration']-t),5),ch=ch,midi=max(21,min(108,int(n))),velocity=max(1,min(120,int(v))),source=source,score_index=score_index))
+    # Acoustic stick count-in, with the exact existing four-beat pre-roll.
+    for i in range(4):add(-data['audio_offset']+i*60/song['bpms'][0],.035,9,37,65 if i==0 else 46)
+    for i,b in enumerate(bars):
+        beat=60/b['bpm'];beats=b['beats'];sec=b['section'];local=i%song['section_bars'];pos=local%8
+        intro=sec==0 and local<4;bridge=sec==2 and local<8;rest=pos==7
+        chord=p['progression'][(local//4+sec*2)%8]
+        energy=[.78,.94,.72,1.0][sec]*(.65 if intro else .55 if bridge else 1)
+        root=pitch(p,chord,-2)
+        length=(beats-(1 if rest else .1))*beat
+        # Voiced piano/strings support chord changes, not a constant synth pad.
+        if song['id'] in ('r03','r04') or bridge:
+            for j,degree in enumerate([chord,chord+2,chord+4]):
+                add(b['t'],length,3,pitch(p,degree,-1),int((37 if song['id']=='r03' else 31)*energy)+j*2)
+        if song['id']=='r01':
+            # Left-hand broken chords and syncopated clean-guitar comping.
+            for k in range(beats):
+                if rest and k>=beats-1:continue
+                add(b['t']+k*beat,.55*beat,4,root+(12 if k%2 else 0),69*energy)
+                if not bridge and k in (1,3):
+                    for j in range(3):add(b['t']+(k+.5)*beat+j*.008,.34*beat,1,pitch(p,chord+j*2,-1),43*energy)
+        elif song['id']=='r02':
+            # Half-time rock: palm-muted power-chord riffs, backbeat on beat 3.
+            for k in [0,.5,1.5,2,2.75,3.5]:
+                if k>=beats-(1 if rest else 0):continue
+                add(b['t']+k*beat,.30*beat,4,root,78*energy)
+                if not intro and not bridge:
+                    for interval in [0,7,12]:add(b['t']+k*beat,.23*beat,2,root+12+interval,47*energy)
+        elif song['id']=='r03':
+            # Cello downbeats, pizzicato replies and piano arpeggios in 3/4/5.
+            add(b['t'],length*.8,4,root+12,52*energy)
+            for k in range(beats):
+                if rest and k>=beats-1:continue
+                add(b['t']+(k+.5)*beat,.34*beat,2,pitch(p,chord+(k%3)*2,-1),55*energy)
+                if pos in (1,5):add(b['t']+k*beat,.42*beat,1,pitch(p,chord+(k%4)*2,-1),47*energy)
         else:
-            instrument, gain = 'piano', .14
-            length = min(.21, beat * .7)
-        sound = tone(midi, length, instrument, 1.1 if voice == 'glitch' else .8)
-        add(note['t'], sound, gain, pan)
-        # Short stereo early reflections add space without inventing another
-        # rhythm .75 beats after each note, as the old delay did.
-        add(note['t'] + .018, sound, gain * .055, -pan)
-        if held:
-            # A sustained body actually ends at the authored release; the
-            # scoring release is therefore audible, not an arbitrary duration.
-            add(note['t'], tone(midi, note['d'], 'pad'), .10, -pan)
-        if layer == 'lead' and note['accent'] and bar['section'] in (1, 3):
-            add(note['t'], tone(midi - 12, min(.13, length), 'piano'), .055, -pan)
+            # Orchestra-rock: alternating piano/bowed theme, guitar power chords.
+            for k in range(beats):
+                if rest and k>=beats-1:continue
+                add(b['t']+k*beat,.65*beat,4,root+(12 if k==3 else 0),72*energy)
+                if sec in (1,3) and not bridge:
+                    for interval in [0,7]:add(b['t']+(k+.5)*beat,.24*beat,2,root+12+interval,50*energy)
+        # Actual acoustic kit. Each song has a different groove and density.
+        if not bridge:
+            for k in range(beats):
+                if rest and k>=beats-1:continue
+                at=b['t']+k*beat
+                if p['drums']=='fusion':
+                    if k in (0,2):add(at,.10,9,36,91*energy)
+                    if k in (1,3):add(at,.10,9,38,81*energy)
+                    if k==2 and pos%2:add(at+.75*beat,.08,9,36,68*energy)
+                    for h in [0,.5]:add(at+h*beat,.045,9,42,43*energy+(7 if h else 0))
+                elif p['drums']=='rock':
+                    if k in (0,1) or k==3 and pos%2:add(at,.12,9,36,102*energy)
+                    if k==2:add(at,.12,9,38,108*energy)
+                    for h in [0,.5]:add(at+h*beat,.07,9,51 if sec==3 else 42,(56 if h==0 else 40)*energy)
+                elif p['drums']=='chamber':
+                    if k==0:add(at,.10,9,36,50*energy)
+                    if k==beats-1:add(at,.065,9,37,52*energy)
+                    if sec in (1,3):add(at+.5*beat,.035,9,42,32*energy)
+                else:
+                    if k%2==0:add(at,.12,9,36,104*energy)
+                    else:add(at,.10,9,38,94*energy)
+                    add(at,.08,9,51,48*energy)
+                    if sec==3:add(at+.5*beat,.08,9,36,60*energy)
+            if pos==0 and not intro:add(b['t'],.7,9,49,68*energy)
+            if pos==6:
+                for j in range(4):add(b['t']+(beats-1+j/4)*beat,.10,9,[50,47,45,38][j],(48+j*9)*energy)
+        else:
+            add(b['t'],.1,9,37,35)
+    bi=0
+    for index,n in enumerate(data['score']):
+        while bi+1<len(bars) and bars[bi+1]['t']<=n['t']+.00001:bi+=1
+        b=bars[bi];local=bi%song['section_bars'];pos=local%8;sec=b['section'];beat=60/b['bpm']
+        chord=p['progression'][(local//4+sec*2)%8]
+        # Motifs reappear as antecedent/consequent phrases, with a harmonic answer.
+        original=n['degree'];degree=p['motif'][original%8]+(7 if original>=8 else 0)
+        if pos>=4:degree+=2 if sec%2 else -2
+        if pos==7:degree=chord+(2 if n['voice']=='reply' else 0)
+        layer=n['voice'];ch={'lead':0,'reply':1,'spark':2,'chord':3}[layer]
+        if song['id']=='r04' and layer=='lead' and sec in (1,3):ch=5
+        if song['id']=='r02' and layer=='lead' and sec==2 and local<8:ch=5
+        midi=pitch(p,degree,0)
+        if layer=='spark':midi+=12 if song['id']=='r01' else 0
+        held=n['d']>=.3
+        # Bowed lead remains articulated at each target; holds release at chart time.
+        duration=n['d'] if held else min(.22,beat*(.55 if ch==0 else .42))
+        velocity={'lead':98,'reply':80,'spark':74,'chord':65}[layer]
+        velocity+=5 if n['accent'] else -5
+        if sec==2 and local<8:velocity-=10
+        add(n['t'],duration,ch,midi,velocity,'score',index)
+    return sorted(events,key=lambda e:(e['t'],e['ch'],e['midi']))
 
-    # Gentle bus saturation: more body than the first mix, with codec overshoot headroom.
-    mix -= mix.mean(axis=0)
-    mix = np.tanh(mix*1.42)
-    mix *= np.minimum(1, np.arange(len(mix), 0, -1)/(RATE*.55))[:, None]
-    mix *= .80/max(.80, float(np.max(np.abs(mix))))
-    pcm = np.rint(mix*32767).astype('<i2')
+
+class Synth:
+    def __init__(self,font,programs):
+        self.lib=C.CDLL(ctypes.util.find_library('fluidsynth'))
+        signatures={
+          'new_fluid_settings':(C.c_void_p,[]),'fluid_settings_setnum':(C.c_int,[C.c_void_p,C.c_char_p,C.c_double]),
+          'fluid_settings_setint':(C.c_int,[C.c_void_p,C.c_char_p,C.c_int]),'new_fluid_synth':(C.c_void_p,[C.c_void_p]),
+          'fluid_synth_sfload':(C.c_int,[C.c_void_p,C.c_char_p,C.c_int]),'fluid_synth_program_change':(C.c_int,[C.c_void_p,C.c_int,C.c_int]),
+          'fluid_synth_cc':(C.c_int,[C.c_void_p,C.c_int,C.c_int,C.c_int]),'fluid_synth_noteon':(C.c_int,[C.c_void_p,C.c_int,C.c_int,C.c_int]),
+          'fluid_synth_noteoff':(C.c_int,[C.c_void_p,C.c_int,C.c_int]),
+          'fluid_synth_write_float':(C.c_int,[C.c_void_p,C.c_int,C.c_void_p,C.c_int,C.c_int,C.c_void_p,C.c_int,C.c_int]),
+          'delete_fluid_synth':(None,[C.c_void_p]),'delete_fluid_settings':(None,[C.c_void_p])}
+        for name,(restype,args) in signatures.items():fn=getattr(self.lib,name);fn.restype=restype;fn.argtypes=args
+        self.settings=self.lib.new_fluid_settings()
+        for key,value in [('synth.sample-rate',RATE),('synth.gain',.65),('synth.reverb.room-size',.38),('synth.reverb.damp',.52),('synth.reverb.level',.16),('synth.chorus.level',.12)]:self.lib.fluid_settings_setnum(self.settings,key.encode(),value)
+        self.lib.fluid_settings_setint(self.settings,b'synth.polyphony',256)
+        self.synth=self.lib.new_fluid_synth(self.settings)
+        if self.lib.fluid_synth_sfload(self.synth,str(font).encode(),1)<0:raise RuntimeError('Cannot load SoundFont')
+        for ch,program in enumerate(programs):
+            self.lib.fluid_synth_program_change(self.synth,ch,program)
+            self.lib.fluid_synth_cc(self.synth,ch,10,[59,77,40,67,64,58][ch])
+            self.lib.fluid_synth_cc(self.synth,ch,91,[24,28,15,34,5,24][ch])
+    def write(self,frames):
+        import numpy as np
+        out=np.zeros((frames,2),np.float32);pointer=out.ctypes.data_as(C.c_void_p)
+        self.lib.fluid_synth_write_float(self.synth,frames,pointer,0,2,pointer,1,2);return out
+    def close(self):self.lib.delete_fluid_synth(self.synth);self.lib.delete_fluid_settings(self.settings)
+
+
+def render(song,data,path):
+    import numpy as np
+    font=Path(os.environ.get('RANKER_SOUNDFONT','/usr/share/sounds/sf2/FluidR3_GM.sf2'))
+    if not font.is_file():raise RuntimeError('Set RANKER_SOUNDFONT to MIT-licensed FluidR3_GM.sf2; see assets/ranker/README.txt')
+    p=PROFILES[song['id']];performance=arrange(song,data);synth=Synth(font,p['programs'])
+    frames=math.ceil((data['duration']+data['audio_offset'])*RATE);mix=np.zeros((frames,2),np.float32)
+    events=[]
+    for token,n in enumerate(performance):
+        start=round((n['t']+data['audio_offset'])*RATE);end=min(frames,round((n['t']+data['audio_offset']+n['d'])*RATE))
+        events.extend([(start,1,token,n),(end,0,token,n)])
+    events.sort(key=lambda e:(e[0],e[1]));cursor=0;active={}
+    try:
+        for at,on,token,n in events:
+            at=max(cursor,min(frames,at))
+            if at>cursor:mix[cursor:at]=synth.write(at-cursor);cursor=at
+            key=(n['ch'],n['midi'])
+            if on:
+                if key in active:synth.lib.fluid_synth_noteoff(synth.synth,*key)
+                synth.lib.fluid_synth_noteon(synth.synth,*key,n['velocity']);active[key]=token
+            elif active.get(key)==token:
+                synth.lib.fluid_synth_noteoff(synth.synth,*key);active.pop(key)
+        if cursor<frames:mix[cursor:]=synth.write(frames-cursor)
+    finally:synth.close()
+    mix-=mix.mean(axis=0)
+    mix*=np.minimum(1,np.arange(frames,0,-1)/(RATE*.45))[:,None]
+    peak=float(np.max(np.abs(mix)));mix*=.89/max(peak,.01)
     with tempfile.TemporaryDirectory() as folder:
-        wav = Path(folder)/'song.wav'
-        with wave.open(str(wav), 'wb') as w:
-            w.setnchannels(2)
-            w.setsampwidth(2)
-            w.setframerate(RATE)
-            w.writeframes(pcm.tobytes())
-        subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', str(wav), '-c:a', 'libvorbis', '-q:a', '4', '-metadata', 'title='+song['title'], '-metadata', 'artist=PERFECTO Ranker Original', str(path)], check=True)
+        wav=Path(folder)/'mix.wav'
+        with wave.open(str(wav),'wb') as out:
+            out.setnchannels(2);out.setsampwidth(2);out.setframerate(RATE);out.writeframes(np.rint(mix*32767).astype('<i2').tobytes())
+        # Materialize the mastered PCM first. Some FFmpeg loudnorm builds retain
+        # padded final packet timestamps when encoding directly to Vorbis; Godot
+        # uses that Ogg granule duration even if a decoder discards the padding.
+        mastered=Path(folder)/'master.wav'
+        subprocess.run(['ffmpeg','-v','error','-y','-i',str(wav),'-af',f'loudnorm=I=-16:TP=-1.5:LRA=9,aresample={RATE},atrim=end_sample={frames}',str(mastered)],check=True)
+        subprocess.run(['ffmpeg','-v','error','-y','-i',str(mastered),'-c:a','libvorbis','-q:a','4','-metadata','title='+song['title'],'-metadata','artist=PERFECTO Original Ensemble',str(path)],check=True)
+    return dict(events=len(performance),foreground=sum(n['source']=='score' for n in performance),soundfont_sha256=hashlib.sha256(font.read_bytes()).hexdigest())

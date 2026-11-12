@@ -76,11 +76,15 @@ func run()->void:
 	var arena=g.interface.gameplay_ui.ranker_ui
 	arena.difficulty_tabs[1].pressed.emit();assert(arena.difficulty=="expert")
 	arena.audition();assert(arena.auditioning and arena.audition_music.started)
+	await process_frame
+	await create_timer(.1).timeout
 	assert(arena.audition_start>0)
 	arena.selected="r02";arena.sync();assert(not arena.auditioning)
-	arena.audition();g.launch_ranker("r01","one");arena.sync()
+	arena.audition();await process_frame;await create_timer(.1).timeout
+	g.launch_ranker("r01","one");arena.sync();await process_frame
 	assert(not arena.auditioning and g.story_music.started)
-	g.open_menu("ranker");arena.stop_audition()
+	g.open_menu("ranker");await process_frame
+	arena.stop_audition();g.story_music.stop()
 	arena=null;ranker_ui=null
 	# Let the native mixer release the stopped stream before engine shutdown.
 	await create_timer(.15).timeout;g.queue_free();await process_frame;await process_frame

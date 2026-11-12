@@ -1,14 +1,27 @@
-PERFECTO Ranker Original Soundtrack
+PERFECTO / ORIGINAL ENSEMBLE
 
-PULSE ENGINE · FRACTURE · IRREGULAR ORBIT · EVENT HORIZON
-Four original electronic arrangements; no external songs, recordings or samples.
-The primary lead uses One Beat chart attacks and holds. The quieter, panned counter-voice follows extra Double notes. All tempo/meter changes are rendered from the same canonical bar markers.
+Four original compositions arranged for sampled piano, acoustic drums, electric
+and clean guitar, violin, strings, pizzicato and bass. No melodies or recordings
+from other games are used.
 
-Original composition and chart source: tools/compose_ranker.py (numpy + ffmpeg to regenerate).
-The runtime and Docker build use the committed Ogg files and require neither dependency.
-Canonical client/server charts: catalog.json. Each soundtrack includes a four-beat metronome count-in for stable first-note synchronization.
+r01 PULSE ENGINE — piano fusion, syncopated clean guitar and acoustic kit
+r02 FRACTURE — guitar rock, palm-muted power chords and half-time backbeat
+r03 IRREGULAR ORBIT — violin, piano, pizzicato and cello in changing meters
+r04 EVENT HORIZON — symphonic rock, alternating piano/violin and guitar/drums
 
-Full arrangements (including four-beat count-in): 3:32 / 3:07 / 3:25 / 3:10.
-Each song includes eight-bar melodic call/response, diatonic seventh-chord voicings, layered piano and synth leads, stereo delay, bass/drums, phrase fills, a breakdown, tempo-change swells and a final tonic resolution. Reference rhythm-game styles inform energy and structure; no reference melodies or audio are included.
+Instrument samples: FluidR3 GM, copyright 2000–2002, 2008 Frank Wen and
+2008 Toby Smithe. MIT license; complete notice in FluidR3-LICENSE.txt.
+Source package: https://deb.debian.org/debian/pool/main/f/fluid-soundfont/
+fluid-soundfont-gm_3.1-6_all.deb; extract usr/share/sounds/sf2/FluidR3_GM.sf2.
+The original SoundFont is not bundled; only rendered music is served.
 
-Three difficulty tiers: HARD retains the released timing; EXPERT/INFERNO use original denser phrase arrangements, lane runs, chord accents and hold/countervoice gates. Canonical chart source: tools/ranker_charts.py. Sound synthesis: tools/ranker_soundtrack.py. Master remaster adds unison leads, club drums, sidechain bass, four-bar builds and high-tier sustain/counter-rhythm cues; no external recordings or samples.
+Regenerate with libfluidsynth, numpy and ffmpeg installed:
+RANKER_SOUNDFONT=/path/to/FluidR3_GM.sf2 python tools/compose_ranker.py
+
+The renderer plays every score attack on an assigned instrument at its exact
+chart time; held score notes send note-off at the target release. Backing parts
+are separately arranged for each genre. Mixes are stereo 44.1 kHz, mastered to
+-16 LUFS / -1.5 dBTP before Vorbis encoding. Song clocks and all 24 playable
+charts are unchanged from chart revision 2; audio_revision 3 invalidates the
+music cache without resetting earned scores. The existing music preview plays
+the new arrangement, and the UI identifies each song's instrument combination.

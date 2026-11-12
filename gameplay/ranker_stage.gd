@@ -94,7 +94,7 @@ func draw(glows:Dictionary)->void:
 	var mode:="DOUBLE" if dual else "ONE BEAT"
 	text("%s  /  %s  /  LV.%d  /  %d BPM"%[mode,g.ranker_difficulty.to_upper(),Ranker.level(g.ranker_id,g.ranker_kind,g.ranker_difficulty),int(bar.bpm)],Vector2(51,160),12,accent)
 	if not g.ranker_loop:
-		text("%.2fx PRACTICE"%g.speed if g.ranker_training else "PERFECTO ORIGINAL",Vector2(850,137),12,Design.MUTED,254,HORIZONTAL_ALIGNMENT_RIGHT)
+		text("%.2fx PRACTICE"%g.speed if g.ranker_training else str(song.get("genre","PERFECTO ORIGINAL")),Vector2(850,137),12,Design.MUTED,254,HORIZONTAL_ALIGNMENT_RIGHT)
 	text("%s / %s"%[stamp(maxf(0,time)),stamp(duration)],Vector2(870,115 if g.ranker_loop else 162),13,Design.WHITE,234,HORIZONTAL_ALIGNMENT_RIGHT)
 	g.draw_line(Vector2(50,178),Vector2(1104,178),Color("23374d"),3,true)
 	if progress>0:g.draw_line(Vector2(50,178),Vector2(50+1054*progress,178),accent,3,true)
