@@ -22,7 +22,7 @@ func sync() -> void:
 	signal_meter.visible=active and g.play_time()>=0
 	if not active:return
 	if intro_panel.visible:
-		var lines:Array=g.Story.intro(g.map_id) if g.ranker_id.is_empty() else [str(g.Ranker.find(g.ranker_id).title)+" / "+("DOUBLE" if g.ranker_kind=="double" else "ONE BEAT"),"22ms PERFECT · 50ms GREAT · 100ms NICE · 정확도 75%에 도전!"]
+		var lines:Array=g.Story.intro(g.map_id) if g.ranker_id.is_empty() else [str(g.Ranker.find(g.ranker_id).title)+" / "+g.ranker_difficulty.to_upper()+" / "+("DOUBLE" if g.ranker_kind=="double" else "ONE BEAT"),"%.0fms PERFECT · %.0fms GREAT · %.0fms NICE · 정확도 75%%에 도전!"%[g.judge_windows()[0]*1000,g.judge_windows()[1]*1000,g.judge_windows()[2]*1000]]
 		intro_line.text=str(lines[0]);dialogue.text=str(lines[1])
 		g.hint.hide()
 	var value:float=100*g.live_points/maxf(1,g.live_possible)

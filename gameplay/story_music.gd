@@ -90,7 +90,7 @@ func stop()->void:
 	started=false;last_clock=0;track_id="";ended_at=-1;clock_locked=false;offsets.clear();sample_at=-1
 
 func loading()->bool:
-	return web_enabled and str(web_driver.state(web_id)) in ["loading","ready"]
+	return web_enabled and str(web_driver.state(web_id)) in ["loading","ready","locked"]
 func failure()->String:
 	return str(web_driver.error(web_id)) if web_enabled else ""
 func _exit_tree()->void:

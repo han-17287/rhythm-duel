@@ -15,6 +15,7 @@ var double_beat = preload("res://gameplay/double_beat.gd").new(self)
 const Ranker=preload("res://gameplay/ranker.gd")
 var ranker_id:=""
 var ranker_kind:="one"
+var ranker_difficulty:="hard"
 var ranker_one_key:=-1
 var ranker_training:=false
 var ranker_seek:=0.0
@@ -24,6 +25,7 @@ var ranker_boards:Dictionary={}
 var ranker_waiting:Dictionary={}
 var ranker_request_at:=0.0
 var ranker_upload_pending:=false
+var ranker_upload_key:=""
 var ranker_upload_at:=0.0
 var map_id:=""
 var map_training:=false
@@ -222,7 +224,7 @@ func account_action(action: String, name_value := "", password_value := "") -> v
 	queue_request({"type":action,"name":name_value,"password":password_value})
 
 func open_menu(destination: String) -> void:
-	ranker_id="";ranker_session="";ranker_waiting.clear()
+	ranker_id="";ranker_difficulty="hard";ranker_session="";ranker_waiting.clear()
 	story_music.stop()
 	double_practice=false
 	double_beat.reset()
@@ -244,7 +246,7 @@ func configure_room(config: Dictionary) -> void:
 	if phase=="room" and slot==0: send_packet({"type":"configure","settings":room_settings})
 
 func start_practice(double_mode := false) -> void:
-	ranker_id="";ranker_session=""
+	ranker_id="";ranker_difficulty="hard";ranker_session=""
 	double_practice=double_mode
 	map_id=""
 	practice = true
@@ -287,16 +289,18 @@ func begin_record() -> void:
 func receive(m: Dictionary) -> void:
 	match m.get("type", ""):
 		"ranker_ready":
-			if ranker_waiting.get("id","")==m.id and ranker_waiting.get("kind","")==m.kind and (interface.page=="ranker" or phase=="result"):
-				ranker_session=str(m.session);ranker_waiting.clear();launch_ranker(str(m.id),str(m.kind))
+			if ranker_waiting.get("id","")==m.id and ranker_waiting.get("kind","")==m.kind and ranker_waiting.get("difficulty","hard")==m.get("difficulty","hard") and (interface.page=="ranker" or phase=="result"):
+				ranker_session=str(m.session);ranker_waiting.clear();launch_ranker(str(m.id),str(m.kind),false,1.0,0.0,0.0,str(m.get("difficulty","hard")))
 		"ranker_board":
-			ranker_boards[str(m.id)+":"+str(m.kind)]=m
+			ranker_boards[Ranker.board_id(str(m.id),str(m.kind),str(m.get("difficulty","hard")))]=m
 		"ranker_result":
-			ranker_upload_pending=false
+			var response_key:=Ranker.board_id(str(m.id),str(m.kind),str(m.get("difficulty","hard")))
+			if response_key==ranker_upload_key:ranker_upload_pending=false
 			apply_profile(m.profile)
-			reward_text="글로벌 기록 등록 완료"+(" · 첫 클리어 +%d 코인"%int(m.coins) if int(m.coins)>0 else "")
-			emote_text=reward_text;emote_until=now()+5
-			ranker_boards.erase(str(m.id)+":"+str(m.kind))
+			if response_key==Ranker.board_id(ranker_id,ranker_kind,ranker_difficulty):
+				reward_text="글로벌 기록 등록 완료"+(" · 첫 클리어 +%d 코인"%int(m.coins) if int(m.coins)>0 else "")
+				emote_text=reward_text;emote_until=now()+5
+			ranker_boards.erase(response_key)
 		"draft_ready":
 			stage_deadline=now()+float(m.get("remaining",90))
 			if phase=="review": hint.text = "미리듣기로 확인하고 공격을 보내세요."
@@ -722,7 +726,7 @@ func save_current_pattern() -> void:
 	emote_until=now()+4
 
 func start_challenge(id: String) -> void:
-	ranker_id="";ranker_session=""
+	ranker_id="";ranker_difficulty="hard";ranker_session=""
 	story_music.stop()
 	double_practice=false
 	map_id=""
@@ -803,7 +807,7 @@ func toggle_pause() -> void:
 func replay_last() -> void:
 	if not practice or phase!="result": return
 	if not ranker_id.is_empty():
-		start_ranker(ranker_id,ranker_kind,ranker_training,speed,ranker_seek,ranker_end);return
+		start_ranker(ranker_id,ranker_kind,ranker_training,speed,ranker_seek,ranker_end,ranker_difficulty);return
 	if not map_id.is_empty():
 		start_map(map_id,map_training,speed,map_guide)
 		return
@@ -818,7 +822,7 @@ func _process(delta: float) -> void:
 	if not ranker_waiting.is_empty() and now()-ranker_request_at>12:
 		var pending_ranker:=ranker_waiting.duplicate();ranker_waiting.clear()
 		emote_text="연결이 지연되어 로컬 기록으로 시작해요.";emote_until=now()+5
-		if interface.page=="ranker" or phase=="result":launch_ranker(pending_ranker.id,pending_ranker.kind)
+		if interface.page=="ranker" or phase=="result":launch_ranker(pending_ranker.id,pending_ranker.kind,false,1.0,0.0,0.0,str(pending_ranker.get("difficulty","hard")))
 	socket.poll()
 	var state := socket.get_ready_state()
 	if state == WebSocketPeer.STATE_OPEN:
@@ -1006,8 +1010,12 @@ func draw_record_note(start: float, duration: float, current: float, active: boo
 		draw_circle(Vector2(clampf(tail,65,1090),460),8,color)
 	if x>=65: draw_note(Vector2(x,460),color)
 
+func note_radius() -> float:
+	if ranker_id.is_empty():return 18.0
+	var base:float={"hard":12.0,"expert":10.5,"inferno":9.0}.get(ranker_difficulty,12.0)
+	return base*minf(1.0,float(preferences.values.ranker_scroll))
 func draw_note(pos: Vector2, color: Color) -> void:
-	NoteSkin.draw(self,pos,color,str(profile.get("skin","mint")),12.0 if not ranker_id.is_empty() else 18.0)
+	NoteSkin.draw(self,pos,color,str(profile.get("skin","mint")),note_radius())
 
 func panel_style() -> StyleBoxFlat:
 	if lane_style: return lane_style
@@ -1024,7 +1032,7 @@ func panel_style() -> StyleBoxFlat:
 
 
 func start_map(id: String, training := false, rate := 1.0, guide := false) -> void:
-	ranker_id="";ranker_session=""
+	ranker_id="";ranker_difficulty="hard";ranker_session=""
 	double_practice=false
 	var data:=Maps.find(id)
 	if data.is_empty() or (not training and not Maps.unlocked(id,preferences.records)):return
@@ -1128,39 +1136,39 @@ func is_song() -> bool:return not map_id.is_empty() or not ranker_id.is_empty()
 func song_bpm() -> float:
 	if not ranker_id.is_empty():return float(Ranker.section(ranker_id,ranker_seek).bpm)
 	return float(Maps.find(map_id).bpm) if not map_id.is_empty() else 120.0
-func judge_windows() -> Array:return Ranker.WINDOWS if not ranker_id.is_empty() else Scoring.WINDOWS
+func judge_windows() -> Array:return Ranker.windows(ranker_difficulty) if not ranker_id.is_empty() else Scoring.WINDOWS
 func hit_window() -> float:return float(judge_windows()[2])
 
-func start_ranker(id: String,kind: String,training := false,rate := 1.0,seek := 0.0,end := 0.0) -> void:
+func start_ranker(id: String,kind: String,training := false,rate := 1.0,seek := 0.0,end := 0.0,difficulty := "hard") -> void:
 	var song:=Ranker.find(id)
-	if song.is_empty() or not kind in ["one","double"]:return
+	if song.is_empty() or not kind in ["one","double"] or not difficulty in Ranker.DIFFICULTIES or Ranker.source_chart(id,kind,difficulty).is_empty():return
 	if not training and not profile.is_empty() and accounts_enabled:
 		if not ranker_waiting.is_empty():return
-		ranker_waiting={"id":id,"kind":kind};ranker_request_at=now()
-		queue_request({"type":"ranker_begin","id":id,"kind":kind})
+		ranker_waiting={"id":id,"kind":kind,"difficulty":difficulty};ranker_request_at=now()
+		queue_request({"type":"ranker_begin","id":id,"kind":kind,"difficulty":difficulty})
 		status.text="기록 도전을 준비하고 있어요…";return
-	launch_ranker(id,kind,training,rate,seek,end)
+	launch_ranker(id,kind,training,rate,seek,end,difficulty)
 
-func launch_ranker(id: String,kind: String,training := false,rate := 1.0,seek := 0.0,end := 0.0) -> void:
+func launch_ranker(id: String,kind: String,training := false,rate := 1.0,seek := 0.0,end := 0.0,difficulty := "hard") -> void:
 	map_id="";map_guide=false;solo_id="";practice=true;slot=0;attacker=0
 	if training or profile.is_empty():ranker_session=""
-	ranker_id=id;ranker_kind=kind;ranker_training=training;ranker_seek=seek if training else 0.0;ranker_end=end if training else 0.0
+	ranker_id=id;ranker_kind=kind;ranker_difficulty=difficulty;ranker_training=training;ranker_seek=seek if training else 0.0;ranker_end=end if training else 0.0
 	speed=clampf(rate,.5,1) if training else 1.0
-	notes=Ranker.chart(id,kind,ranker_seek,ranker_end);new_best=false;reward_text=""
+	notes=Ranker.chart(id,kind,ranker_seek,ranker_end,difficulty);new_best=false;reward_text=""
 	begin_play();match_finished=false
-	status.text="RANKER / %s / %s / %s"%["DOUBLE" if kind=="double" else "ONE BEAT",str(Ranker.find(id).title),"연습 %.2fx"%speed if training else "STRICT TIMING"]
+	status.text="RANKER / %s / %s / %s / %s"%[difficulty.to_upper(),"DOUBLE" if kind=="double" else "ONE BEAT",str(Ranker.find(id).title),"연습 %.2fx"%speed if training else "STRICT TIMING"]
 
 func finish_ranker() -> void:
 	story_music.stop()
-	last_report=Scoring.analyze(notes,hits,Ranker.WINDOWS,true)
+	last_report=Scoring.analyze(notes,hits,Ranker.windows(ranker_difficulty),true)
 	last_report.grade=Ranker.grade(last_report.accuracy)
 	last_report_mine=true;phase="result";match_finished=true
-	if not ranker_training:new_best=preferences.remember(Ranker.record_id(ranker_id,ranker_kind),last_report)
+	if not ranker_training:new_best=preferences.remember(Ranker.record_id(ranker_id,ranker_kind,ranker_difficulty),last_report)
 	result.text="연습 완료" if ranker_training else "RANKER CLEAR" if last_report.accuracy>=75 else "RETRY THE LIMIT"
 	next_button.hide()
 	if not ranker_training and not ranker_session.is_empty():
-		ranker_upload_pending=true;ranker_upload_at=now();reward_text="글로벌 기록 등록 중…"
-		queue_request({"type":"ranker_result","session":ranker_session,"hits":hits})
+		ranker_upload_key=Ranker.board_id(ranker_id,ranker_kind,ranker_difficulty);ranker_upload_pending=true;ranker_upload_at=now();reward_text="글로벌 기록 등록 중…"
+		queue_request({"type":"ranker_result","session":ranker_session,"hits":hits,"difficulty":ranker_difficulty})
 		ranker_session=""
 	if last_report.accuracy>=75:sounds.fanfare();effects.confetti()
 
@@ -1168,7 +1176,7 @@ func scroll_pixels() -> float:
 	return 260*1.55*float(preferences.values.ranker_scroll) if not ranker_id.is_empty() else 260.0
 func restart_practice_current() -> void:
 	if not practice:return
-	if not ranker_id.is_empty():launch_ranker(ranker_id,ranker_kind,true,speed,ranker_seek,ranker_end)
+	if not ranker_id.is_empty():launch_ranker(ranker_id,ranker_kind,true,speed,ranker_seek,ranker_end,ranker_difficulty)
 	elif not map_id.is_empty():start_map(map_id,map_training,speed,map_guide)
 	elif not solo_id.is_empty():start_challenge(solo_id)
 	else:begin_play()

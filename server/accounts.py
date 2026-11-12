@@ -129,7 +129,14 @@ class Store:
             db.execute('UPDATE settlements SET details=? WHERE match_id=?',(json.dumps(changes),match_id))
             return changes
 
-    def ranker_submit(self,uid,song,kind,report):
+    @staticmethod
+    def ranker_song(song,difficulty='hard'):
+        # Keep the original HARD database keys and all existing records intact.
+        if difficulty not in ('hard','expert','inferno'):raise AccountError('없는 랭커 난이도입니다')
+        return song if difficulty=='hard' else song+':'+difficulty
+
+    def ranker_submit(self,uid,song,kind,report,difficulty='hard'):
+        song=self.ranker_song(song,difficulty)
         with self.transaction() as db:
             # Serialize both reward and best-score updates on the account row.
             suffix=' FOR UPDATE' if self.url else ''
@@ -146,7 +153,8 @@ class Store:
             if reward:db.execute('UPDATE accounts SET coins=coins+? WHERE id=?',(reward,uid))
             return dict(best=better,coins=reward,profile=self.profile(uid,db))
 
-    def ranker_board(self,song,kind,uid=None):
+    def ranker_board(self,song,kind,uid=None,difficulty='hard'):
+        song=self.ranker_song(song,difficulty)
         with self.transaction() as db:
             rows=db.execute('SELECT a.name,b.points,b.accuracy,b.combo,b.grade FROM ranker_bests b JOIN accounts a ON a.id=b.account_id WHERE b.song=? AND b.kind=? ORDER BY b.points DESC,b.combo DESC,b.updated ASC,a.name ASC LIMIT 20',(song,kind)).fetchall()
             own=db.execute('SELECT points,accuracy,combo,grade FROM ranker_bests WHERE account_id=? AND song=? AND kind=?',(uid,song,kind)).fetchone() if uid else None

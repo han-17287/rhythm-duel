@@ -9,6 +9,7 @@ from websockets.http11 import Response
 from websockets.datastructures import Headers
 from websockets.asyncio.server import serve
 rooms = {}
+MAX_MESSAGE_BYTES=524288
 
 STATIC_DIR = Path(os.getenv('STATIC_DIR', str(Path(__file__).parent/'static'))).resolve()
 
@@ -136,23 +137,24 @@ async def handle(ws):
                 elif typ=='ranker_board':
                     if time.monotonic()-ranker_board_last<.25:raise ValueError('잠시 후 다시 조회하세요')
                     ranker_board_last=time.monotonic()
-                    song_id=m.get('id');kind=m.get('kind')
-                    if song_id not in ranker.SONGS or kind not in ('one','double'):raise ValueError('없는 랭커 종목입니다')
-                    board=await asyncio.to_thread(store.ranker_board,song_id,kind,uid) if store.enabled else dict(rows=[],own=None)
-                    await send(ws,type='ranker_board',id=song_id,kind=kind,enabled=store.enabled,**board)
+                    song_id=m.get('id');kind=m.get('kind');difficulty=m.get('difficulty','hard')
+                    ranker.chart(song_id,kind,difficulty)
+                    board=await asyncio.to_thread(store.ranker_board,song_id,kind,uid,difficulty) if store.enabled else dict(rows=[],own=None)
+                    await send(ws,type='ranker_board',id=song_id,kind=kind,difficulty=difficulty,enabled=store.enabled,**board)
                 elif typ=='ranker_begin':
                     if not uid:raise AccountError('글로벌 기록은 로그인이 필요합니다. 게스트는 로컬 기록으로 도전할 수 있어요.')
                     if room in rooms:raise ValueError('방에서 나온 후 랭커 모드를 시작하세요')
                     if time.monotonic()-ranker_begin_last<.25:raise ValueError('잠시 후 다시 시작하세요')
-                    ranker_begin_last=time.monotonic();ranker_run=ranker.begin(uid,m.get('id'),m.get('kind'))
-                    await send(ws,type='ranker_ready',id=ranker_run['id'],kind=ranker_run['kind'],session=ranker_run['token'])
+                    ranker_begin_last=time.monotonic();ranker_run=ranker.begin(uid,m.get('id'),m.get('kind'),m.get('difficulty','hard'))
+                    await send(ws,type='ranker_ready',id=ranker_run['id'],kind=ranker_run['kind'],difficulty=ranker_run['difficulty'],session=ranker_run['token'])
                 elif typ=='ranker_result':
                     if not uid or not ranker_run or ranker_run['uid']!=uid:raise AccountError('기록 도전을 다시 시작해 주세요')
+                    if 'difficulty' in m and m['difficulty']!=ranker_run['difficulty']:raise ValueError('도전한 난이도와 다릅니다')
                     report=await asyncio.to_thread(ranker.finish,ranker_run,m.get('session'),m.get('hits'))
                     run=ranker_run
-                    result=await asyncio.to_thread(store.ranker_submit,uid,run['id'],run['kind'],report)
+                    result=await asyncio.to_thread(store.ranker_submit,uid,run['id'],run['kind'],report,run['difficulty'])
                     ranker_run=None
-                    await send(ws,type='ranker_result',id=run['id'],kind=run['kind'],report=report,**result)
+                    await send(ws,type='ranker_result',id=run['id'],kind=run['kind'],difficulty=run['difficulty'],report=report,**result)
                 elif typ in ('buy','equip'):
                     if not uid: raise AccountError('로그인이 필요합니다.')
                     if room in rooms: raise AccountError('방에서 나온 후 스킨을 변경하세요.')
@@ -270,6 +272,6 @@ async def cleanup():
                 await broadcast(r,type='error',message='제한 시간이 지나 방을 닫습니다')
                 for w in r['players']: await w.close()
 async def main():
-    async with serve(handle,'0.0.0.0',int(os.getenv('PORT','8765')),max_size=262144,ping_interval=20,open_timeout=120,process_request=serve_game):
+    async with serve(handle,'0.0.0.0',int(os.getenv('PORT','8765')),max_size=MAX_MESSAGE_BYTES,ping_interval=20,open_timeout=120,process_request=serve_game):
         await cleanup()
 if __name__=='__main__': asyncio.run(main())

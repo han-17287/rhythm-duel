@@ -8,6 +8,14 @@ from accounts import Store
 from scoring import analyze
 from websockets.asyncio.client import connect
 from websockets.asyncio.server import serve
+
+def tier_fixture():
+    charts={}
+    for difficulty,count in [('hard',1),('expert',2),('inferno',3)]:
+        one=[{'t':180+i*.2,'d':0} for i in range(count)]
+        charts[difficulty]=dict(one=one,double=[{**n,'lane':i%2} for i,n in enumerate(one)])
+    return dict(id='fixture',duration=190,audio_offset=1,charts=charts['hard'],extras={key:charts[key] for key in ['expert','inferno']})
+
 class RankerScoring(unittest.TestCase):
     def test_eight_canonical_charts_and_strict_windows(self):
         for song in ranker.SONGS.values():
@@ -34,12 +42,61 @@ class RankerScoring(unittest.TestCase):
         self.assertEqual(analyze(note,note,max_time=241)['accuracy'],100)
         with self.assertRaises(ValueError):analyze([{'t':242,'d':0}],[{'t':242,'d':0}],max_time=241)
 
+    def test_all_difficulty_charts_are_scored_authoritatively(self):
+        for song in ranker.SONGS.values():
+            for difficulty in ranker.DIFFICULTY_WINDOWS:
+                for kind in ['one','double']:
+                    with self.subTest(song=song['id'],difficulty=difficulty,kind=kind):
+                        notes=ranker.chart(song['id'],kind,difficulty)
+                        self.assertLessEqual(len(notes),ranker.MAX_HITS)
+                        run=ranker.begin('uid',song['id'],kind,difficulty);run['started']-=run['duration']+1
+                        report=ranker.finish(run,run['token'],notes)
+                        self.assertEqual((report['accuracy'],report['grade'],report['max_combo']),(100,'EX',len(notes)))
+                        self.assertLessEqual(len(json.dumps(dict(type='ranker_result',session='x'*40,difficulty=difficulty,hits=notes)).encode()),s.MAX_MESSAGE_BYTES)
+
     def test_dense_inputs_match_live_press_order(self):
         notes=[{'t':0,'d':0},{'t':.076,'d':0}]
         hits=[{'t':-.06,'d':.01},{'t':.01,'d':.01}]
         report=analyze(notes,hits,windows=ranker.WINDOWS,chronological=True)
         self.assertEqual(report['counts'],[0,0,2,0])
         self.assertEqual((report['extra'],report['max_combo']),(0,2))
+
+    def test_difficulty_windows_and_canonical_chart_are_bound_to_run(self):
+        fixture=tier_fixture()
+        with patch.dict(ranker.SONGS,{'fixture':fixture}):
+            for difficulty,expected in [('hard',1000),('expert',700),('inferno',700)]:
+                run=ranker.begin('uid','fixture','one',difficulty);run['started']-=run['duration']+1
+                # Only the first note is pressed: 21ms is PERFECT on HARD but GREAT on tighter tiers.
+                report=ranker.finish(run,run['token'],[{'t':180.021,'d':0}])
+                self.assertEqual(report['points'],expected)
+                self.assertEqual(run['difficulty'],difficulty)
+            expert=ranker.begin('uid','fixture','one','expert');expert['started']-=expert['duration']+1
+            self.assertEqual(ranker.finish(expert,expert['token'],fixture['charts']['one'])['accuracy'],50)
+            self.assertEqual(ranker.finish(expert,expert['token'],fixture['extras']['expert']['one'])['accuracy'],100)
+            for invalid in ['easy','EXPERT','',None]:
+                with self.assertRaises((ValueError,TypeError)):ranker.begin('uid','fixture','one',invalid)
+            # Missing extras must fail instead of silently submitting a HARD score for another tier.
+            with patch.dict(ranker.SONGS,{'legacy':dict(fixture,charts=fixture['charts'],extras={})}):
+                with self.assertRaises(ValueError):ranker.begin('uid','legacy','one','expert')
+
+    def test_difficulty_bests_boards_and_rewards_preserve_legacy_hard(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path=str(Path(folder)/'tiers.db');store=Store(path=path)
+            uid=store.register('tier_records','password123')['profile']['id']
+            for difficulty,points in [('hard',1000),('expert',2000),('inferno',3000)]:
+                report=dict(points=points,accuracy=100,max_combo=points//1000,grade='EX')
+                self.assertEqual(store.ranker_submit(uid,'r01','one',report,difficulty)['coins'],40)
+                self.assertEqual(store.ranker_submit(uid,'r01','one',report,difficulty)['coins'],0)
+                self.assertEqual(store.ranker_board('r01','one',uid,difficulty)['own']['points'],points)
+            # Old callers still select exactly the original HARD record and reward flag.
+            self.assertEqual(store.ranker_board('r01','one',uid)['own']['points'],1000)
+            self.assertEqual(store.profile(uid)['coins'],120)
+            reopened=Store(path=path)
+            self.assertEqual(reopened.ranker_board('r01','one',uid,'inferno')['own']['points'],3000)
+            with store.transaction() as db:
+                keys=[row['song'] for row in db.execute('SELECT song FROM ranker_bests ORDER BY song').fetchall()]
+            self.assertEqual(keys,['r01','r01:expert','r01:inferno'])
+            with self.assertRaises(ValueError):store.ranker_board('r01','one',uid,'wrong')
 
     def test_session_timing_lane_and_token_validation(self):
         run=ranker.begin('uid','r01','one');notes=ranker.SONGS['r01']['charts']['one']
@@ -70,6 +127,37 @@ class RankerScoring(unittest.TestCase):
             self.assertEqual(store.profile(uid)['coins'],40)
 
 class RankerProtocol(unittest.IsolatedAsyncioTestCase):
+    async def test_tiers_nonce_binding_and_separate_global_boards(self):
+        fixture=tier_fixture()
+        with tempfile.TemporaryDirectory() as folder,patch.object(s,'store',Store(path=str(Path(folder)/'tiers.db'))),patch.dict(ranker.SONGS,{'fixture':fixture}):
+            async with serve(s.handle,'127.0.0.1',0,max_size=s.MAX_MESSAGE_BYTES) as server:
+                async with connect(f'ws://127.0.0.1:{server.sockets[0].getsockname()[1]}') as ws:
+                    async def send(**data):await ws.send(json.dumps(data))
+                    async def recv():return json.loads(await asyncio.wait_for(ws.recv(),5))
+                    await send(type='register',name='tier_protocol',password='password123');await recv()
+                    original_finish=ranker.finish
+                    def mature_finish(run,token,hits):
+                        return original_finish(dict(run,started=run['started']-run['duration']-1),token,hits)
+                    for difficulty,count in [('hard',1),('expert',2),('inferno',3)]:
+                        await asyncio.sleep(.26)
+                        # The first run deliberately uses the legacy request shape without a tier.
+                        await send(type='ranker_begin',id='fixture',kind='one',**({} if difficulty=='hard' else {'difficulty':difficulty}))
+                        ready=await recv();self.assertEqual((ready['type'],ready['difficulty']),('ranker_ready',difficulty))
+                        notes=ranker.chart('fixture','one',difficulty)
+                        await send(type='ranker_result',session=ready['session'],difficulty='wrong',hits=notes)
+                        self.assertEqual((await recv())['type'],'error')
+                        with patch.object(ranker,'finish',side_effect=mature_finish):
+                            # An omitted result tier still uses the nonce-bound run, never the default HARD chart.
+                            await send(type='ranker_result',session=ready['session'],hits=notes)
+                            result=await recv()
+                        self.assertEqual((result['type'],result['difficulty'],result['report']['points'],result['coins']),('ranker_result',difficulty,count*1000,40))
+                        await send(type='ranker_result',session=ready['session'],difficulty=difficulty,hits=notes)
+                        self.assertEqual((await recv())['type'],'error')
+                        await send(type='ranker_board',id='fixture',kind='one',**({} if difficulty=='hard' else {'difficulty':difficulty}))
+                        board=await recv()
+                        self.assertEqual((board['difficulty'],board['own']['points']), (difficulty,count*1000))
+                    self.assertEqual(result['profile']['coins'],120)
+
     async def test_authenticated_global_replay_and_board(self):
         with tempfile.TemporaryDirectory() as folder,patch.object(s,'store',Store(path=str(Path(folder)/'test.db'))):
             async with serve(s.handle,'127.0.0.1',0,max_size=262144) as server:

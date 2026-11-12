@@ -8,6 +8,8 @@ var calibration_ui: RefCounted
 var ranker_ui: RefCounted
 var story_hud: RefCounted
 var music_slider: HSlider
+var music_restore:Button
+var music_restore_settings:Button
 var music_value: Label
 var map_ui: RefCounted
 var course_page: Control
@@ -245,6 +247,10 @@ func build() -> void:
 	music_slider=HSlider.new();music_slider.position=Vector2(24,282);music_slider.size=Vector2(458,28);music_slider.max_value=1;music_slider.step=.05;music_slider.value=float(g.preferences.values.music_volume)
 	ui.decorate_slider(music_slider);left.add_child(music_slider)
 	music_slider.value_changed.connect(func(v):g.preferences.values.music_volume=v;changed())
+	music_restore_settings=ui.button(left,"음악 켜기",Rect2(320,238,162,32),restore_music)
+	music_restore_settings.add_theme_font_size_override("font_size",13)
+	music_restore=ui.button(g,"소리 음소거 · 켜기",Rect2(882,648,222,40),restore_music)
+	music_restore.z_index=30;music_restore.hide()
 	var right: Panel=ui.card(settings_page,Rect2(578,238,526,337))
 	ui.text(right,"입력과 화면",24,18,24)
 	key_select=ui.selector(right,Rect2(24,68,478,44),["SPACE","D","F","J","K"])
@@ -290,6 +296,12 @@ func changed() -> void:
 	g.apply_preferences()
 	g.preferences.save()
 
+func restore_music() -> void:
+	if float(g.preferences.values.volume)<=.001:g.preferences.values.volume=.55
+	if float(g.preferences.values.music_volume)<=.001:g.preferences.values.music_volume=.8
+	changed()
+	if g.story_music and g.story_music.web_enabled:g.story_music.web_driver.unlock()
+
 func reset_settings() -> void:
 	g.preferences.values=g.preferences.DEFAULTS.duplicate()
 	volume_slider.value=float(g.preferences.values.volume)
@@ -300,6 +312,10 @@ func reset_settings() -> void:
 	changed()
 
 func sync() -> void:
+	var muted:bool=float(g.preferences.values.volume)<=.001 or float(g.preferences.values.music_volume)<=.001
+	music_restore.visible=muted and ((g.phase=="lobby" and ui.page in ["ranker","solo","settings"]) or (g.phase=="play" and g.is_song()))
+	music_restore_settings.disabled=not muted
+	music_restore_settings.text="음악 켜기" if muted else "음악 ON"
 	apply_stage_theme(g.stage.active())
 	map_ui.sync()
 	ranker_ui.sync()
@@ -371,7 +387,7 @@ func sync() -> void:
 		ui.tips.text="%s  리듬 입력   ·   %s"%[("F 위 / J 아래" if g.is_double() else "SPACE / F / J" if not g.ranker_id.is_empty() else str(g.preferences.values.key)),"ESC 잠시 멈춤" if g.practice else "타이밍을 맞춰 연속 콤보!"]
 	elif g.phase=="record":
 		ui.tips.text="%s  리듬 입력   ·   8개를 채운 뒤 미리듣기로 확인해봐"%("F 위 / J 아래" if g.is_double() else "SPACE / F / J" if not g.ranker_id.is_empty() else str(g.preferences.values.key))
-	if g.phase=="play" and not g.ranker_id.is_empty():ui.role.text="RANKER / %s · LV.%d"%["DOUBLE" if g.ranker_kind=="double" else "ONE BEAT",int(g.Ranker.find(g.ranker_id).level)+(2 if g.ranker_kind=="double" else 0)]
+	if g.phase=="play" and not g.ranker_id.is_empty():ui.role.text="RANKER / %s / %s · LV.%d"%[g.ranker_difficulty.to_upper(),"DOUBLE" if g.ranker_kind=="double" else "ONE BEAT",g.Ranker.level(g.ranker_id,g.ranker_kind,g.ranker_difficulty)]
 	if g.phase=="play" and not g.map_id.is_empty():ui.role.text="MAP / %s  ·  %s"%["PRACTICE" if g.map_training else "CHALLENGE",str(g.Maps.find(g.map_id).skill)]
 	ui.key_hint.text="" if g.is_double() else "SPACE / F / J" if not g.ranker_id.is_empty() else str(g.preferences.values.key)
 	ui.key_hint.position.x=870;ui.key_hint.size.x=232;ui.key_hint.horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER
@@ -437,7 +453,7 @@ func sync() -> void:
 			if not g.map_training and not g.preferences.persist_ok:footer.text="저장이 차단되어 기록과 해금은 이번 창에서만 유지돼요."
 
 		if not g.ranker_id.is_empty():
-			footer.text="구간 연습 완료 · 정식 기록에 반영하지 않아요." if g.ranker_training else ("NEW BEST! · " if g.new_best else "")+"%s / 엄격 판정 · 75%% 클리어 · %s"%["DOUBLE" if g.ranker_kind=="double" else "ONE BEAT",g.reward_text if not g.reward_text.is_empty() else "로컬 최고 기록 저장"]
+			footer.text="구간 연습 완료 · 정식 기록에 반영하지 않아요." if g.ranker_training else ("NEW BEST! · " if g.new_best else "")+"%s / %s · 75%% 클리어 · %s"%[g.ranker_difficulty.to_upper(),"DOUBLE" if g.ranker_kind=="double" else "ONE BEAT",g.reward_text if not g.reward_text.is_empty() else "로컬 최고 기록 저장"]
 		ui.reward_shop.visible=not g.practice and g.match_finished
 		ui.reward_shop.position=Vector2(355,590)
 		g.next_button.position=Vector2(50,590)
