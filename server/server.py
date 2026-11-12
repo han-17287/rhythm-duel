@@ -64,7 +64,28 @@ def pattern_end(notes): return max(n['t']+n['d'] for n in notes)
 from scoring import score, analyze
 import ranker
 
-store = Store.from_env()
+# HTTP and guest rooms must not depend on account database availability.
+store = Store()
+ACCOUNT_RETRY_SECONDS = 30
+
+async def initialize_accounts():
+    global store
+    if not (os.getenv('DATABASE_URL') or os.getenv('ACCOUNT_DB_PATH')):
+        return
+    while True:
+        try:
+            ready = await asyncio.to_thread(Store.from_env)
+        except Exception as error:
+            # Connection exception text can contain the database URL/password.
+            logging.warning('Account database unavailable (%s, SQLSTATE=%s); HTTP and guest play remain available. Check DATABASE_URL. Retrying in %ss.',
+                            type(error).__name__, getattr(error, 'sqlstate', None) or 'unknown', ACCOUNT_RETRY_SECONDS)
+            await asyncio.sleep(ACCOUNT_RETRY_SECONDS)
+            continue
+        store = ready
+        logging.warning('Account database ready; login and account records enabled.')
+        await asyncio.gather(*(send(ws,type='hello',accounts_enabled=store.enabled,catalog=CATALOG,online=len(sessions))
+                               for ws in list(sessions)),return_exceptions=True)
+        return
 auth_attempts = {}
 MODES = {'casual':'일반전','rush':'스피드전','ranked':'랭크전 β','double':'더블 비트'}
 
@@ -475,5 +496,11 @@ async def cleanup():
                 for w in r['players']: await w.close()
 async def main():
     async with serve(handle,'0.0.0.0',int(os.getenv('PORT','8765')),max_size=MAX_MESSAGE_BYTES,ping_interval=20,open_timeout=120,process_request=serve_game):
-        await cleanup()
+        logging.warning('HTTP and WebSocket server listening on port %s',os.getenv('PORT','8765'))
+        accounts_task=asyncio.create_task(initialize_accounts())
+        try:
+            await cleanup()
+        finally:
+            accounts_task.cancel()
+            await asyncio.gather(accounts_task,return_exceptions=True)
 if __name__=='__main__': asyncio.run(main())
