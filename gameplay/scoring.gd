@@ -6,7 +6,7 @@ const POINTS = [1000,700,400,0]
 static func judgment(error: float, windows := WINDOWS) -> int:
 	return 0 if error<=windows[0]+0.000001 else 1 if error<=windows[1]+0.000001 else 2 if error<=windows[2]+0.000001 else 3
 
-static func analyze(notes: Array, hits: Array, windows := WINDOWS, chronological := false) -> Dictionary:
+static func analyze(notes: Array, hits: Array, windows := WINDOWS, chronological := false, extra_penalty := 200) -> Dictionary:
 	var assignment:Dictionary={}
 	if chronological:
 		var order:Array=range(hits.size())
@@ -70,7 +70,9 @@ static func analyze(notes: Array, hits: Array, windows := WINDOWS, chronological
 		best_combo=maxi(best_combo,combo)
 		combo_events.append(int(event.j))
 	var extra := hits.size()-used.size()
-	points = maxi(0,points-200*extra)
+	extra_penalty=maxi(0,extra_penalty)
+	var penalty_points:=mini(points,extra_penalty*extra)
+	points -= penalty_points
 	var accuracy := 100.0*points/maxi(1,maximum)
 	var grade := "S" if accuracy>=95 else "A" if accuracy>=85 else "B" if accuracy>=70 else "C" if accuracy>=50 else "D"
-	return {"points":points,"maximum":maximum,"accuracy":snappedf(accuracy,0.1),"grade":grade,"counts":counts,"judgments":outcomes,"offsets":offsets,"max_combo":best_combo,"combo_events":combo_events,"extra":extra,"full_combo":counts[3]==0 and extra==0 and notes.size()>0,"all_perfect":counts[0]==notes.size() and extra==0 and notes.size()>0}
+	return {"points":points,"maximum":maximum,"accuracy":snappedf(accuracy,0.1),"grade":grade,"counts":counts,"judgments":outcomes,"offsets":offsets,"max_combo":best_combo,"combo_events":combo_events,"extra":extra,"extra_penalty":extra_penalty,"penalty_points":penalty_points,"full_combo":counts[3]==0 and extra==0 and notes.size()>0,"all_perfect":counts[0]==notes.size() and extra==0 and notes.size()>0}

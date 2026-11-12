@@ -231,7 +231,10 @@ class Social(unittest.IsolatedAsyncioTestCase):
         await b.send('match_join',mode='ranked')
         await a.until('joined');await b.until('joined')
         await a.until('match_found');await b.until('match_found')
-        await a.send('match_cancel');await a.until('match_status',queued=False);await b.until('left')
+        await a.send('match_cancel');await a.until('match_status',queued=False)
+        # Canceling a reserved match also acknowledges leaving that room.
+        # Consume it here so the next game's leave cannot match this old reply.
+        await a.until('leave_ok');await b.until('left')
         for profile in (pa,pb):
             stored=self.store.profile(profile['id'])
             self.assertEqual((stored['rating'],stored['coins'],stored['wins'],stored['losses']),(1000,0,0,0))
@@ -241,6 +244,10 @@ class Social(unittest.IsolatedAsyncioTestCase):
         await a.until('joined');await b.until('joined')
         await a.until('turn');await b.until('turn')
         await a.send('leave');await a.until('leave_ok');await b.until('left')
+        # `left` is intentionally sent before storage work. The reward packets
+        # are the protocol's confirmation that the ranked settlement committed.
+        loser_reward=await a.until('reward');winner_reward=await b.until('reward')
+        self.assertEqual((loser_reward['profile']['losses'],winner_reward['profile']['wins']),(1,1))
         loser=self.store.profile(pa['id']);winner=self.store.profile(pb['id'])
         self.assertEqual((loser['losses'],winner['wins']),(1,1))
         self.assertLess(loser['rating'],1000);self.assertGreater(winner['rating'],1000)
@@ -326,7 +333,7 @@ class Social(unittest.IsolatedAsyncioTestCase):
         await b.send('match_cancel');await b.until('match_status',queued=False)
         await a.send('login',name='change_identity',password='matching-password123');await a.until('profile')
         await a.send('match_join',mode='casual');await a.until('match_status',queued=True)
-        await a.send('ranker_begin',id='r01',kind='one',difficulty='hard')
+        await a.send('ranker_begin',id='r01',kind='one',difficulty='hard',revision=s.ranker.revision('r01'))
         self.assertEqual((await a.until('ranker_ready'))['id'],'r01')
         await b.send('match_join',mode='casual');await b.until('match_status',queued=True)
         await b.no('joined')

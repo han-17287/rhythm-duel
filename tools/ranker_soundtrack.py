@@ -14,7 +14,7 @@ RATE = 22050
 
 
 def render(song, data, path):
-    """Render an original club arrangement without changing any chart timing."""
+    """Render the shared authored score on its canonical musical clock."""
     preroll = data['audio_offset']
     duration = data['duration'] + preroll
     mix = np.zeros((math.ceil(duration * RATE), 2), dtype=np.float64)
@@ -121,10 +121,6 @@ def render(song, data, path):
               'finale':[0, 2, 3, 5, 7, 8, 11, 12]}
     scale = scales[voice]
     progression = [0, 5, 2, 6, 0, 3, 5, 6]
-    motifs = [[0, 2, 4, 5, 4, 2, 1, 2], [4, 5, 7, 6, 5, 4, 2, 1],
-              [0, 1, 2, 4, 2, 1, 0, 4], [7, 6, 4, 5, 4, 2, 1, 0],
-              [2, 4, 5, 7, 5, 4, 2, 1], [0, 2, 1, 4, 2, 5, 4, 2],
-              [4, 2, 0, 1, 2, 4, 6, 5], [7, 5, 4, 2, 1, 2, 1, 0]]
     bar_for_note = []
     for i, bar in enumerate(data['bars']):
         local = i % song['section_bars']
@@ -140,7 +136,10 @@ def render(song, data, path):
         elif intro:
             energy = .45+local*.08
         build = section < 3 and local >= song['section_bars']-4
+        phrase_rest = local % 8 == 7
         for step in range(bar['beats']):
+            if phrase_rest and step == bar['beats'] - 1:
+                continue
             at = bar['t']+step*beat
             if not breakdown or step == 0:
                 add(at, drums['kick'], .45*energy)
@@ -162,21 +161,21 @@ def render(song, data, path):
                 add(at+.75*beat, drums['hat'], .025*energy, .35)
         # Diatonic sevenths, voiced around the melody rather than transposed minor chords.
         for interval in intervals:
-            pad = tone(chord+interval, bar_length*.94, 'pad')
+            pad = tone(chord+interval, (bar_length-beat if phrase_rest else bar_length*.94), 'pad')
             add(bar['t'], pump(pad, beat, 0 if breakdown else .53), .040*energy, (interval-5)*.085)
         if i % 8 == 0 and not intro:
             add(bar['t'], drums['crash'], .17*energy, -.30)
         if local == 0 and section in (1, 3):
             add(bar['t'], drums['impact'], .24, 0)
             add(bar['t']+.02, drums['crash'], .16, .35)
-        if i % 8 == 7 and not breakdown:
+        if i % 8 == 6 and not breakdown:
             for fill in range(4):
                 add(bar['t']+bar_length-(4-fill)*beat*.25, drums['snare'], (.035+fill*.015)*energy, (fill-1.5)*.20)
             if voice in ('glitch', 'finale'):
                 for fill in range(3):
                     add(bar['t']+bar_length-(3-fill)*beat/3, drums['tom'], .08*energy, -.3+fill*.3)
         # A four-bar build grows towards the tempo boundary; the downbeat impact resolves it.
-        if build:
+        if build and not phrase_rest:
             progress = (local-(song['section_bars']-4))/4
             subdivisions = 4 if progress >= .5 else 2
             for pulse in range(bar['beats']*subdivisions):
@@ -189,76 +188,50 @@ def render(song, data, path):
             add(bar['t'], (sweep+noise)*(progress*.55+u*.35)**2*np.minimum((bar_length-t)/.02, 1), .10, .25)
         bar_for_note.append((bar, energy, breakdown, chord))
 
+    # The score is the source of BOTH sound and all playable arrangements.
+    # Its foreground hook, answering piano and brief sparkling ornaments have
+    # distinct timbres and intentional dynamics, never a quiet union-of-charts.
     bar_index = 0
-    for i, n in enumerate(data['charts']['one']):
-        while bar_index+1 < len(data['bars']) and data['bars'][bar_index+1]['t'] <= n['t']+.00001:
+    score = data['score']
+    for i, note in enumerate(score):
+        while bar_index + 1 < len(data['bars']) and data['bars'][bar_index + 1]['t'] <= note['t'] + .00001:
             bar_index += 1
         bar, energy, breakdown, chord = bar_for_note[bar_index]
-        beat = 60/bar['bpm']
-        position = (n['t']-bar['t'])/beat
-        motif = motifs[(bar_index//2) % 8]
-        degree = motif[int(position*2+.001) % 8]
-        octave = 12 if bar['section'] in (1, 3) and bar_index % 8 >= 4 else 0
-        midi = root+12+scale[degree]+octave
-        if i == len(data['charts']['one'])-1:
-            midi = root+12
-        next_gap = data['charts']['one'][i+1]['t']-n['t'] if i+1 < len(data['charts']['one']) else .3
-        length = n['d']+.025 if n['d'] > 0 else max(.06, min(.23, next_gap*.85))
-        kind = 'piano' if breakdown or voice == 'orbit' and bar['section'] == 0 else 'lead'
-        sound = tone(midi, length, kind, 1.25 if voice == 'glitch' else .8)
-        add(n['t'], sound, .29 if breakdown else .28, .12*math.sin(bar_index*.45))
-        add(n['t']+beat*.75, sound, .028, -.52)
-        add(n['t']+beat*1.5, sound, .014, .52)
-        if bar['section'] == 3 and i % 4 == 0 and midi < 78:
-            # An octave response lifts the last drop without obscuring timing attacks.
-            add(n['t'], tone(midi+12, min(.16, length), 'bell'), .045, -.28)
-
-    primary = {round(n['t'], 4) for n in data['charts']['one']}
-    bar_index = 0
-    for i, n in enumerate(data['charts']['double']):
-        if round(n['t'], 4) in primary:
-            continue
-        while bar_index+1 < len(data['bars']) and data['bars'][bar_index+1]['t'] <= n['t']+.00001:
-            bar_index += 1
-        bar, energy, breakdown, chord = bar_for_note[bar_index]
-        midi = root+24+scale[motifs[(bar_index//2) % 8][i % 8]]
-        add(n['t'], tone(midi, max(.055, min(.14, n['d']+.07)), 'bell' if voice == 'orbit' else 'piano'), .12, -.48 if n['lane'] == 0 else .48)
-        primary.add(round(n['t'], 4))
-
-    # Higher-tier extra attacks form a quiet rhythmic countervoice, not a second loud lead.
-    # Union both disciplines so every selected chart retains an audible timing cue.
-    accents = {}
-    sustains = {}
-    hard_holds = {}
-    for kind in ('one', 'double'):
-        for n in data['charts'][kind]:
-            stamp = round(n['t'], 4)
-            hard_holds[stamp] = max(hard_holds.get(stamp, 0), n['d'])
-    for tier in ('expert', 'inferno'):
-        for kind in ('one', 'double'):
-            for n in data.get('extras', {}).get(tier, {}).get(kind, []):
-                stamp = round(n['t'], 4)
-                if stamp not in primary and n['d'] >= accents.get(stamp, {}).get('d', -1):
-                    accents[stamp] = n
-                if n['d'] >= .3 and n['d'] > hard_holds.get(stamp, 0)+.01:
-                    if n['d'] > sustains.get(stamp, {}).get('d', 0):sustains[stamp] = n
-    bar_index = 0
-    for i, (at, n) in enumerate(sorted(accents.items())):
-        while bar_index+1 < len(data['bars']) and data['bars'][bar_index+1]['t'] <= at+.00001:
-            bar_index += 1
-        bar, energy, breakdown, chord = bar_for_note[bar_index]
-        midi = root+24+scale[motifs[(bar_index//2) % 8][i % 8]]
-        add(n['t'], tone(midi, max(.065, n['d']+.025), 'bell'), .065 if not breakdown else .042, -.38 if n.get('lane', 0) == 0 else .38)
-        add(n['t'], drums['hat'], .014*energy, .4 if i % 2 else -.4)
-
-    bar_index = 0
-    for at, n in sorted(sustains.items()):
-        while bar_index+1 < len(data['bars']) and data['bars'][bar_index+1]['t'] <= at+.00001:
-            bar_index += 1
-        degree = motifs[(bar_index//2) % 8][int((at-data['bars'][bar_index]['t'])*data['bars'][bar_index]['bpm']/30) % 8]
-        # A gentle held body lasts through the authored release, including holds
-        # that share their initial attack with a shorter Hard-chart note.
-        add(n['t'], tone(root+12+scale[degree], n['d']+.025, 'pad'), .055, -.28 if n.get('lane', 0) == 0 else .28)
+        beat = 60 / bar['bpm']
+        layer = note['voice']
+        degree = note['degree']
+        midi = root + 12 + scale[degree % 7] + 12 * (degree // 7)
+        if layer == 'spark':
+            midi += 12
+        if bar['section'] == 3 and layer == 'lead' and bar_index % 8 >= 4:
+            midi += 12
+        held = note['d'] >= .3
+        length = note['d'] if held else min(.19, beat * .6)
+        pan = (-.16 if note['hand'] == 0 else .16) if layer == 'lead' else (-.45 if note['hand'] == 0 else .45)
+        accent = 1.12 if note['accent'] else .92
+        if layer == 'lead':
+            instrument = 'piano' if breakdown or voice == 'orbit' and bar['section'] == 0 else 'lead'
+            gain = (.32 if breakdown else .30) * accent
+        elif layer == 'reply':
+            instrument, gain = ('bell' if voice == 'orbit' else 'piano'), .23 * accent
+            length = min(.15, beat * .48)
+        elif layer == 'spark':
+            instrument, gain = 'bell', .16 * accent
+            length = min(.10, beat * .3)
+        else:
+            instrument, gain = 'piano', .14
+            length = min(.21, beat * .7)
+        sound = tone(midi, length, instrument, 1.1 if voice == 'glitch' else .8)
+        add(note['t'], sound, gain, pan)
+        # Short stereo early reflections add space without inventing another
+        # rhythm .75 beats after each note, as the old delay did.
+        add(note['t'] + .018, sound, gain * .055, -pan)
+        if held:
+            # A sustained body actually ends at the authored release; the
+            # scoring release is therefore audible, not an arbitrary duration.
+            add(note['t'], tone(midi, note['d'], 'pad'), .10, -pan)
+        if layer == 'lead' and note['accent'] and bar['section'] in (1, 3):
+            add(note['t'], tone(midi - 12, min(.13, length), 'piano'), .055, -pan)
 
     # Gentle bus saturation: more body than the first mix, with codec overshoot headroom.
     mix -= mix.mean(axis=0)

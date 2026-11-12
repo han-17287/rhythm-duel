@@ -24,10 +24,14 @@ func sync() -> void:
 	if intro_panel.visible:
 		var lines:Array=g.Story.intro(g.map_id) if g.ranker_id.is_empty() else [str(g.Ranker.find(g.ranker_id).title)+" / "+g.ranker_difficulty.to_upper()+" / "+("DOUBLE" if g.ranker_kind=="double" else "ONE BEAT"),"%.0fms PERFECT · %.0fms GREAT · %.0fms NICE · 정확도 75%%에 도전!"%[g.judge_windows()[0]*1000,g.judge_windows()[1]*1000,g.judge_windows()[2]*1000]]
 		intro_line.text=str(lines[0]);dialogue.text=str(lines[1])
+		if not g.ranker_id.is_empty() and g.ranker_training and g.ranker_loop:
+			intro_line.text="반복 %d · %s"%[g.ranker_loop_count,str(g.Ranker.find(g.ranker_id).title)]
+			dialogue.text="쉼표는 쉬고, 들리는 리듬을 따라가요.  R 다시 시작 · L 반복 끄기" if g.ranker_loop_last.is_empty() else "직전 %.1f%% · 최고 %.1f%% · R 다시 시작 · L 반복 끄기"%[float(g.ranker_loop_last.accuracy),g.ranker_loop_best]
 		g.hint.hide()
-	var value:float=100*g.live_points/maxf(1,g.live_possible)
+	var value:float=clampf(100*g.live_points/maxf(1,g.live_possible),0,100)
 	signal_meter.value=value
 	var label:Label=g.interface.gameplay_ui.energy
 	label.visible=active and not intro_panel.visible
 	label.text=("SYNC %.1f%% / CLEAR 75%%" if not g.ranker_id.is_empty() else "SIGNAL %.1f%% / CLEAR 60%%")%value
+	if not g.ranker_id.is_empty() and g.live_extra>0:label.text="SYNC %.1f%% · 추가 입력 %d"%[value,g.live_extra]
 	label.add_theme_color_override("font_color",Color("68ffe0") if value>=(75 if not g.ranker_id.is_empty() else 60) else Color("ffdc88"))

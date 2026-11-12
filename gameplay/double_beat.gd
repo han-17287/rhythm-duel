@@ -87,6 +87,7 @@ func draw_note(t: float,d: float,lane: int,clock: float,review: bool,active: boo
 	if x>=65:g.draw_note(Vector2(x,y),color)
 func draw() -> void:
 	g.draw_style_box(g.panel_style(),Rect2(48,355,1056,165))
+	g.stage.draw_rhythm_grid()
 	var target:=1050.0 if g.phase in ["record","review"] else 180.0
 	var clock:float=maxf(0,g.now()-g.origin) if g.phase=="record" else g.play_time()
 	for lane in range(2):
@@ -101,7 +102,9 @@ func draw() -> void:
 			var style:StyleBoxFlat=pad_styles[lane];style.bg_color=Color(COLORS[lane],.24 if held[lane] else .08);style.border_color=Color(COLORS[lane],.8)
 			g.draw_style_box(style,rect)
 			g.draw_string(g.theme.default_font,rect.position+Vector2(43,50),"F" if lane==0 else "J",HORIZONTAL_ALIGNMENT_LEFT,-1,25,COLORS[lane])
-	for i in range(g.notes.size()):
+	var first:int=g.note_index_at(clock-g.max_note_duration-1) if g.phase=="play" else 0
+	for i in range(first,g.notes.size()):
+		if g.phase=="play" and 180+(float(g.notes[i].t)-clock)*g.scroll_pixels()>1090:break
 		if g.phase in ["play","preview"] and g.resolved.has(i):continue
 		var n:Dictionary=g.notes[i]
 		draw_note(float(n.t),float(n.d),int(n.get("lane",0)),clock,g.phase=="review",holds.has(i))

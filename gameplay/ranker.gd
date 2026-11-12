@@ -1,5 +1,6 @@
 extends RefCounted
 const WINDOWS=[.022,.05,.1]
+const EXTRA_PENALTY=600
 const DIFFICULTIES=["hard","expert","inferno"]
 const TIER_WINDOWS={"hard":[.022,.05,.1],"expert":[.020,.045,.090],"inferno":[.018,.040,.080]}
 static var songs: Array=[]
@@ -24,7 +25,10 @@ static func chart(id: String,kind: String,seek := 0.0,end := 0.0,difficulty := "
 		if float(note.t)+.00001<seek or (end>0 and float(note.t)>=end-.00001):continue
 		var n:Dictionary=note.duplicate();n.t=float(n.t)-seek;result.append(n)
 	return result
-static func board_id(id: String,kind: String,difficulty := "hard") -> String:return id+":"+kind+(":"+difficulty if difficulty!="hard" else "")
+static func revision(id: String) -> int:return int(find(id).get("revision",1))
+static func board_id(id: String,kind: String,difficulty := "hard") -> String:
+	var version:=revision(id)
+	return id+":"+kind+(":"+difficulty if difficulty!="hard" else "")+(":v%d"%version if version>1 else "")
 static func record_id(id: String,kind: String,difficulty := "hard") -> String:return "ranker:"+board_id(id,kind,difficulty)
 static func section(id: String,time: float) -> Dictionary:
 	var bars:Array=find(id).bars

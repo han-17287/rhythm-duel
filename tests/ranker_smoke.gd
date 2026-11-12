@@ -34,11 +34,11 @@ func run()->void:
 				assert(g.last_report.all_perfect and g.last_report.accuracy==100,"Input parity "+song.id+kind+difficulty)
 				assert(g.preferences.records.has(Ranker.record_id(song.id,kind,difficulty)))
 				g.interface.sync()
-	assert(Ranker.record_id("r01","one")=="ranker:r01:one")
-	assert(Ranker.record_id("r01","one","expert")=="ranker:r01:one:expert")
-	assert(Ranker.record_id("r01","double","inferno")=="ranker:r01:double:inferno")
+	assert(Ranker.record_id("r01","one")=="ranker:r01:one:v2")
+	assert(Ranker.record_id("r01","one","expert")=="ranker:r01:one:expert:v2")
+	assert(Ranker.record_id("r01","double","inferno")=="ranker:r01:double:inferno:v2")
 	assert(g.preferences.records.size()==24)
-	var hard_saved:Dictionary=g.preferences.records["ranker:r01:one"]
+	var hard_saved:Dictionary=g.preferences.records[Ranker.record_id("r01","one")]
 	assert(hard_saved.points==Score.analyze(Ranker.chart("r01","one"),Ranker.chart("r01","one")).points)
 	var final_song:=Ranker.find("r04")
 	g.launch_ranker("r04","double",true,.5,float(final_song.bars[int(final_song.section_bars)*3].t))
@@ -62,7 +62,7 @@ func run()->void:
 	g.toggle_pause();assert(g.paused and g.story_music.player.stream_paused)
 	g.restart_practice_current();assert(not g.paused and g.ranker_training and g.ranker_seek==seek and g.ranker_end==end)
 	var ranker_ui=g.interface.gameplay_ui.ranker_ui
-	ranker_ui.selected="r04";ranker_ui.kind="double";ranker_ui.difficulty="inferno";ranker_ui.section_select.select(4);ranker_ui.speed.select(1);ranker_ui.practice_selected()
+	ranker_ui.selected="r04";ranker_ui.kind="double";ranker_ui.difficulty="inferno";ranker_ui.rebuild_practice_options();ranker_ui.section_select.select(4);ranker_ui.speed.select(1);ranker_ui.practice_selected()
 	assert(g.ranker_seek==float(song.bars[int(song.section_bars)*3].t) and g.ranker_end==float(song.duration))
 	assert(Ranker.section("r04",g.ranker_seek).section==3 and g.ranker_difficulty=="inferno")
 	g.restart_practice_current();assert(g.ranker_difficulty=="inferno")
@@ -77,5 +77,6 @@ func run()->void:
 	arena.selected="r02";arena.sync();assert(not arena.auditioning)
 	arena.audition();g.launch_ranker("r01","one");arena.sync()
 	assert(not arena.auditioning and g.story_music.started)
+	arena=null;ranker_ui=null
 	await create_timer(.4).timeout;g.queue_free();await process_frame
 	print("RANKER_SMOKE_OK: 24 tiered charts, %d notes, exact Ogg durations, real one/double inputs, holds, separate records, section/half-speed practice"%total);quit()

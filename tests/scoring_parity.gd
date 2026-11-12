@@ -5,8 +5,8 @@ func _initialize() -> void:
 	var cases=JSON.parse_string(FileAccess.get_file_as_string(path))
 	for i in range(cases.size()):
 		var c: Dictionary=cases[i]
-		var actual:=Scoring.analyze(c.notes,c.hits,c.get("windows",Scoring.WINDOWS),bool(c.get("chronological",false)))
-		for key in ["points","maximum","grade","counts","judgments","max_combo","extra","full_combo","all_perfect","combo_events"]:
+		var actual:=Scoring.analyze(c.notes,c.hits,c.get("windows",Scoring.WINDOWS),bool(c.get("chronological",false)),int(c.get("extra_penalty",200)))
+		for key in ["points","maximum","grade","counts","judgments","max_combo","extra","extra_penalty","penalty_points","full_combo","all_perfect","combo_events"]:
 			var equal: bool=true
 			if actual[key] is Array:
 				equal=actual[key].size()==c.report[key].size()

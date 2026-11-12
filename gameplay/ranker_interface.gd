@@ -33,10 +33,14 @@ var audition_music:Node
 var audition_button:Button
 var audition_id:=""
 var audition_start:=0.0
+var audition_end:=0.0
 var auditioning:=false
 var scroll_select:OptionButton
 var speed:OptionButton
 var section_select:OptionButton
+var loop_toggle:CheckButton
+var practice_ranges:Array=[]
+var practice_song:=""
 var play:Button
 var train:Button
 var board_button:Button
@@ -48,7 +52,7 @@ var board_at:=-10.0
 func _init(game:Control,base:RefCounted)->void:game_ref=weakref(game);ui_ref=weakref(base)
 func build()->void:
 	page=ui.group()
-	ui.text(page,"COMPETE / BREAK YOUR LIMIT",50,123,12,Design.MINT).add_theme_font_override("font",Design.font("display"))
+	ui.text(page,"RHYTHM RE:FORM / NEW ARRANGEMENT",50,123,12,Design.MINT).add_theme_font_override("font",Design.font("display"))
 	ui.text(page,"RANKER ARENA",48,149,38).add_theme_font_override("font",Design.font("display"))
 	power=ui.text(page,"",50,203,14,Design.MUTED)
 	for i in range(2):
@@ -79,10 +83,23 @@ func build()->void:
 	audition_button=ui.button(detail,"♫ 곡 미리듣기",Rect2(389,130,166,34),audition)
 	audition_button.add_theme_font_size_override("font_size",13)
 	audition_button.tooltip_text="첫 드롭부터 18초를 들어봐요. 박자 그림은 첫 6초이며, 다시 누르면 멈춰요."
-	best=ui.text(detail,"",24,181,19,Design.MINT)
-	timing_info=ui.text(detail,"",24,218,13,Design.MUTED)
+	best=ui.text(detail,"",24,176,18,Design.MINT)
+	timing_info=ui.text(detail,"",24,209,12,Design.MUTED)
+	timing_info.size=Vector2(531,38);timing_info.clip_text=true
+	loop_toggle=CheckButton.new();loop_toggle.text="선택 구간 반복"
+	loop_toggle.position=Vector2(20,245);loop_toggle.size=Vector2(214,29)
+	loop_toggle.add_theme_font_size_override("font_size",13)
+	loop_toggle.add_theme_color_override("font_color",Design.MINT)
+	loop_toggle.tooltip_text="연습에서만 적용돼요. 같은 구간을 카운트다운과 함께 반복하며 기록·보상에는 반영되지 않아요."
+	detail.add_child(loop_toggle)
+	ui.text(detail,"쉼표도 리듬 · 구간을 느리게 익혀요",260,251,12,Design.MUTED)
 	speed=ui.selector(detail,Rect2(24,278,128,40),["0.50x","0.75x","1.00x"]);speed.select(1)
 	section_select=ui.selector(detail,Rect2(166,278,205,40),["전체 곡 연습","SECTION 01","SECTION 02","SECTION 03","SECTION 04"])
+	section_select.fit_to_longest_item=false
+	section_select.text_overrun_behavior=TextServer.OVERRUN_TRIM_ELLIPSIS
+	section_select.get_popup().max_size=Vector2i(560,420)
+	section_select.item_selected.connect(func(_i):signature="";stop_audition())
+	speed.tooltip_text="연습 재생 속도예요. 기록 도전은 항상 원래 속도로 진행해요."
 	scroll_select=ui.selector(detail,Rect2(389,278,166,40),["노트 0.8x","노트 1.0x","노트 1.2x","노트 1.4x"])
 	scroll_select.select(maxi(0,[.8,1.0,1.2,1.4].find(float(g.preferences.values.ranker_scroll))))
 	scroll_select.tooltip_text="스크롤 속도만 바뀌며 곡과 판정에는 영향을 주지 않아요."
@@ -94,7 +111,8 @@ func build()->void:
 	board_text=ui.text(board,"",24,70,16,Design.WHITE)
 	board_text.size=Vector2(531,290);board_text.clip_text=true
 	ui.text(page,"↑ ↓ 곡   ← → 종목   Q E 난이도   ENTER 도전   P 연습   G 기록판",50,661,13,Design.MUTED)
-	song_status=ui.text(g,"",50,548,15,Design.VIOLET)
+	song_status=ui.text(g,"",50,548,13,Design.VIOLET)
+	song_status.size=Vector2(792,24);song_status.clip_text=true
 	transition=ui.card(g,Rect2(424,168,292,60),Design.VIOLET);transition.z_index=2;transition.mouse_filter=Control.MOUSE_FILTER_IGNORE
 	transition_title=ui.text(transition,"",14,8,19,Design.MINT);transition_title.add_theme_font_override("font",Design.font("display"))
 	transition_caption=ui.text(transition,"",14,36,11,Design.MUTED)
@@ -106,19 +124,39 @@ func stop_audition()->void:
 func audition()->void:
 	if auditioning:stop_audition();return
 	var song:=Ranker.find(selected)
+	rebuild_practice_options()
+	var bounds:=preview_bounds(song)
 	audition_id=selected;auditioning=true
-	audition_start=float(song.audio_offset)+float(song.bars[int(song.get("section_bars",12))].t)
+	audition_start=float(song.audio_offset)+float(bounds.t)
+	audition_end=float(song.audio_offset)+minf(float(bounds.end),float(bounds.t)+18)
 	audition_music.prepare(selected,1,0,"ranker")
 	audition_music.volume(float(g.preferences.values.volume),float(g.preferences.values.music_volume))
 	audition_music.start(audition_start)
 	audition_button.text="■ 미리듣기 중지"
 func practice_selected()->void:
+	rebuild_practice_options()
+	var bounds:Dictionary=practice_ranges[clampi(section_select.selected,0,practice_ranges.size()-1)]
+	g.start_ranker(selected,kind,true,[.5,.75,1.0][speed.selected],float(bounds.t),float(bounds.end),difficulty,loop_toggle.button_pressed)
+func rebuild_practice_options()->void:
+	if practice_song==selected and not practice_ranges.is_empty():return
+	practice_song=selected
 	var song:=Ranker.find(selected)
 	var section_bars:=maxi(1,int(song.get("section_bars",12)))
-	var index:=clampi(section_select.selected-1,0,3)*section_bars
-	var seek:float=song.bars[index].t
-	var end:float=(song.bars[index+section_bars].t if index+section_bars<song.bars.size() else song.duration) if section_select.selected>0 else 0.0
-	g.start_ranker(selected,kind,true,[.5,.75,1.0][speed.selected],seek,end,difficulty)
+	practice_ranges=[{"t":0.0,"end":0.0}]
+	section_select.clear();section_select.add_item("전체 곡 연습")
+	for section in range(4):
+		var index:=section*section_bars
+		practice_ranges.append({"t":float(song.bars[index].t),"end":float(song.bars[index+section_bars].t) if index+section_bars<song.bars.size() else float(song.duration)})
+		section_select.add_item("SECTION %02d"%(section+1))
+	var phrases:Array=song.get("phrases",[])
+	for i in range(phrases.size()):
+		var phrase:Dictionary=phrases[i]
+		practice_ranges.append({"t":float(phrase.t),"end":float(phrase.end)})
+		section_select.add_item("%02d · %s"%[i+1,str(phrase.get("technique",phrase.get("label","PHRASE")))])
+	section_select.select(0)
+func preview_bounds(song:Dictionary)->Dictionary:
+	if section_select.selected>0 and section_select.selected<practice_ranges.size():return practice_ranges[section_select.selected]
+	return {"t":float(song.bars[int(song.get("section_bars",12))].t),"end":float(song.duration)}
 func refresh_board()->void:
 	g.ranker_waiting.clear()
 	signature=""
@@ -127,7 +165,7 @@ func refresh_board()->void:
 func request_board_if_ready()->void:
 	if board_request_key.is_empty() or not board_mode or g.now()-board_at<.4:return
 	board_request_key="";board_at=g.now()
-	g.queue_request({"type":"ranker_board","id":selected,"kind":kind,"difficulty":difficulty})
+	g.queue_request({"type":"ranker_board","id":selected,"kind":kind,"difficulty":difficulty,"revision":Ranker.revision(selected)})
 func handle_input(event:InputEventKey)->bool:
 	if ui.page!="ranker" or not page.visible or not event.pressed or speed.get_popup().visible or section_select.get_popup().visible or scroll_select.get_popup().visible:return false
 	var index:=int(selected.substr(1))-1
@@ -149,7 +187,7 @@ func sync()->void:
 		if not page.visible or audition_id!=selected:stop_audition()
 		elif not audition_music.failure().is_empty():
 			stop_audition();audition_button.text="↻ 미리듣기 재시도"
-		elif audition_music.time()>=audition_start+18:stop_audition()
+		elif audition_music.time()>=audition_end:stop_audition()
 		else:
 			audition_music.volume(float(g.preferences.values.volume),float(g.preferences.values.music_volume))
 			audition_button.text="불러오는 중…" if audition_music.loading() else "■ 미리듣기 중지"
@@ -167,14 +205,29 @@ func sync()->void:
 			transition_caption.text="SECTION %02d / %s / %s"%[int(bar.section)+1,g.ranker_difficulty.to_upper(),"DOUBLE" if g.ranker_kind=="double" else "ONE BEAT"]
 			transition.modulate.a=1 if g.preferences.values.reduced_motion else clampf((1.4-elapsed)/.4,0,1)
 		var upcoming:Dictionary={}
-		for item in song.bars:
-			if int(item.section)>int(bar.section):upcoming=item;break
+		var next_section:=(int(bar.section)+1)*section_bars
+		if next_section<song.bars.size():upcoming=song.bars[next_section]
 		var warning:bool=not upcoming.is_empty() and float(upcoming.t)-now<2
-		song_status.text="%s · SECTION %02d · %d BPM%s"%[str(song.title),int(bar.section)+1,int(bar.bpm),"  → %d BPM IN %.1fs"%[int(upcoming.bpm),float(upcoming.t)-now] if warning else "  ·  %s"%["F / J" if g.ranker_kind=="double" else "SPACE / F / J"]]
+		var phrase_index:=-1
+		var phrases:Array=song.get("phrases",[])
+		for i in range(phrases.size()):
+			if float(phrases[i].t)>now:break
+			phrase_index=i
+		var phrase_text:="SECTION %02d"%(int(bar.section)+1)
+		var next_text:=""
+		if phrase_index>=0:
+			var phrase:Dictionary=phrases[phrase_index]
+			phrase_text="%02d · %s"%[phrase_index+1,str(phrase.get("technique",phrase.get("label","")))]
+			if phrase_index+1<phrases.size() and float(phrase.end)-now<4*60.0/float(bar.bpm):
+				next_text="  → 다음: %s"%str(phrases[phrase_index+1].get("technique",""))
+		if warning:next_text="  → %d BPM · %d박 뒤"%[int(upcoming.bpm),maxi(1,ceili((float(upcoming.t)-now)*float(bar.bpm)/60))]
+		song_status.text="%d BPM · %d/4  |  %s%s"%[int(bar.bpm),int(bar.beats),phrase_text,next_text]
+		if g.ranker_loop:song_status.text="반복 %d · 최고 %.1f%%  |  "%[g.ranker_loop_count,g.ranker_loop_best]+song_status.text
 		song_status.add_theme_color_override("font_color",Color("ffbd73") if warning else Design.VIOLET)
 	if not page.visible:signature="";return
-	power.text="%s · ONE POWER %d / DOUBLE POWER %d"%[difficulty.to_upper(),Ranker.power(g.preferences.records,"one",difficulty),Ranker.power(g.preferences.records,"double",difficulty)]
-	var key:=selected+kind+difficulty+str(g.preferences.records.hash())+str(board_mode)+str(g.ranker_boards.hash())+str(g.ranker_waiting.is_empty())+str(g.now()-board_at>12)+str(g.profile.get("id",""))+str(g.accounts_enabled)
+	rebuild_practice_options()
+	power.text="V%d · %s · ONE %d / DOUBLE %d POWER"%[Ranker.revision(selected),difficulty.to_upper(),Ranker.power(g.preferences.records,"one",difficulty),Ranker.power(g.preferences.records,"double",difficulty)]
+	var key:=selected+kind+difficulty+str(section_select.selected)+str(g.preferences.records.hash())+str(board_mode)+str(g.ranker_boards.hash())+str(g.ranker_waiting.is_empty())+str(g.now()-board_at>12)+str(g.profile.get("id",""))+str(g.accounts_enabled)
 	if key==signature:return
 	signature=key
 	detail.visible=not board_mode;board.visible=board_mode
@@ -186,12 +239,15 @@ func sync()->void:
 	subtitle.text="%s / %s / %s / LV.%d"%[str(song.subtitle),difficulty.to_upper(),"DOUBLE" if kind=="double" else "ONE BEAT",Ranker.level(selected,kind,difficulty)]
 	var duration:=ceili(float(song.duration))
 	facts.text="%d → %d BPM · %d:%02d · %d NOTES"%[int(song.bpms[0]),int(song.bpms.max()),duration/60,duration%60,Ranker.source_chart(selected,kind,difficulty).size()]
-	var preview_start:float=song.bars[int(song.get("section_bars",12))].t
-	preview.notes=Ranker.chart(selected,kind,preview_start,preview_start+6,difficulty);preview.queue_redraw()
+	var bounds:=preview_bounds(song)
+	var preview_start:float=bounds.t
+	preview.notes=Ranker.chart(selected,kind,preview_start,minf(preview_start+6,float(bounds.end)),difficulty);preview.queue_redraw()
+	section_select.tooltip_text=section_select.get_item_text(section_select.selected)+" · 짧은 프레이즈를 골라 반복하면 쉼표와 엇박을 익히기 좋아요."
+	audition_button.tooltip_text="선택 구간부터 최대 18초를 들어봐요. 전체 곡을 선택하면 첫 드롭부터 시작해요."
 	var record:Dictionary=g.preferences.records.get(Ranker.record_id(selected,kind,difficulty),{})
 	best.text="첫 기록에 도전해봐" if record.is_empty() else "%s  %.1f%%  /  MAX %d COMBO"%[str(record.grade),float(record.accuracy),int(record.max_combo)]
 	var windows:=Ranker.windows(difficulty)
-	timing_info.text="%s  %.0fms / %.0fms / %.0fms\n정식: 75%% 클리어 / 일시정지 없음 · 구간 연습 별도"%[difficulty.to_upper(),windows[0]*1000,windows[1]*1000,windows[2]*1000]
+	timing_info.text="%s · %.0f / %.0f / %.0fms · 75%% 클리어\n빈 박 추가 입력 -%d점 · 연습은 기록·보상 제외"%[difficulty.to_upper(),windows[0]*1000,windows[1]*1000,windows[2]*1000,Ranker.EXTRA_PENALTY]
 	for i in range(3):
 		var selected_tier:bool=Ranker.DIFFICULTIES[i]==difficulty
 		var accent:Color=[Design.MINT,Color("ffbd73"),Color("ff719b")][i]

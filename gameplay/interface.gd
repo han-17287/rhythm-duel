@@ -70,6 +70,7 @@ var footer: Label
 var emotes: OptionButton
 var double_touch: Array=[]
 var touch_input: Button
+var loop_stop: Button
 
 func _init(game: Control, base_ui: RefCounted) -> void:
 	g=game
@@ -80,6 +81,8 @@ func build() -> void:
 	map_ui.build()
 	ranker_ui=preload("res://gameplay/ranker_interface.gd").new(g,ui)
 	ranker_ui.build()
+	loop_stop=ui.button(g,"반복 끄기 · L",Rect2(870,124,234,40),g.stop_ranker_loop)
+	loop_stop.add_theme_font_size_override("font_size",14)
 	calibration_ui=preload("res://gameplay/calibration.gd").new(g,ui)
 	calibration_ui.build()
 
@@ -346,6 +349,7 @@ func sync() -> void:
 	emotes.visible=not g.practice and not g.opponent_left and g.phase in ["room","waiting","result"]
 	emotes.position.y=590 if g.phase=="result" else 124
 	var playing: bool=g.phase=="play" and not g.paused
+	loop_stop.visible=playing and not g.ranker_id.is_empty() and g.ranker_training and g.ranker_loop
 	var mine: bool=g.practice or g.slot!=g.attacker
 	combo_label.visible=playing or g.phase in ["record","review","preview"]
 	precision.visible=playing
@@ -387,7 +391,10 @@ func sync() -> void:
 		ui.tips.text="%s  리듬 입력   ·   %s"%[("F 위 / J 아래" if g.is_double() else "SPACE / F / J" if not g.ranker_id.is_empty() else str(g.preferences.values.key)),"ESC 잠시 멈춤" if g.practice else "타이밍을 맞춰 연속 콤보!"]
 	elif g.phase=="record":
 		ui.tips.text="%s  리듬 입력   ·   8개를 채운 뒤 미리듣기로 확인해봐"%("F 위 / J 아래" if g.is_double() else "SPACE / F / J" if not g.ranker_id.is_empty() else str(g.preferences.values.key))
-	if g.phase=="play" and not g.ranker_id.is_empty():ui.role.text="RANKER / %s / %s · LV.%d"%[g.ranker_difficulty.to_upper(),"DOUBLE" if g.ranker_kind=="double" else "ONE BEAT",g.Ranker.level(g.ranker_id,g.ranker_kind,g.ranker_difficulty)]
+	if g.phase=="play" and not g.ranker_id.is_empty():
+		ui.role.text="RANKER / %s / %s · LV.%d"%[g.ranker_difficulty.to_upper(),"DOUBLE" if g.ranker_kind=="double" else "ONE BEAT",g.Ranker.level(g.ranker_id,g.ranker_kind,g.ranker_difficulty)]
+		g.hint.hide()
+		ui.tips.text="%s · 쉼표에서는 쉬기 · %s"%["F 위 / J 아래" if g.is_double() else "SPACE / F / J", "R 구간 재시작 · ESC 일시정지" if g.ranker_training else "추가 입력 -600점 · 정확도 75% 클리어"]
 	if g.phase=="play" and not g.map_id.is_empty():ui.role.text="MAP / %s  ·  %s"%["PRACTICE" if g.map_training else "CHALLENGE",str(g.Maps.find(g.map_id).skill)]
 	ui.key_hint.text="" if g.is_double() else "SPACE / F / J" if not g.ranker_id.is_empty() else str(g.preferences.values.key)
 	ui.key_hint.position.x=870;ui.key_hint.size.x=232;ui.key_hint.horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER
@@ -454,6 +461,7 @@ func sync() -> void:
 
 		if not g.ranker_id.is_empty():
 			footer.text="구간 연습 완료 · 정식 기록에 반영하지 않아요." if g.ranker_training else ("NEW BEST! · " if g.new_best else "")+"%s / %s · 75%% 클리어 · %s"%[g.ranker_difficulty.to_upper(),"DOUBLE" if g.ranker_kind=="double" else "ONE BEAT",g.reward_text if not g.reward_text.is_empty() else "로컬 최고 기록 저장"]
+			if int(r.extra)>0:footer.text+=" · 추가 %d회 (-%d)"%[int(r.extra),int(r.get("penalty_points",int(r.extra)*600))]
 		ui.reward_shop.visible=not g.practice and g.match_finished
 		ui.reward_shop.position=Vector2(355,590)
 		g.next_button.position=Vector2(50,590)

@@ -2,7 +2,7 @@
 import math
 WINDOWS=(.035,.08,.18)
 POINTS=(1000,700,400,0)
-def analyze(notes,hits,windows=WINDOWS,max_hits=64,chronological=False,max_time=120):
+def analyze(notes,hits,windows=WINDOWS,max_hits=64,chronological=False,max_time=120,extra_penalty=200):
     if not isinstance(hits,list) or len(hits)>max_hits: raise ValueError('입력 개수 오류')
     clean=[]
     for h in hits:
@@ -44,10 +44,12 @@ def analyze(notes,hits,windows=WINDOWS,max_hits=64,chronological=False,max_time=
     combo_events=[]
     for _,j in sorted(events,key=lambda event:event[0]):
         combo=0 if j==3 else combo+1;best_combo=max(best_combo,combo);combo_events.append(j)
-    extra=len(clean)-len(used);total=max(0,total-200*extra)
+    extra=len(clean)-len(used)
+    extra_penalty=max(0,int(extra_penalty));penalty_points=min(total,extra_penalty*extra)
+    total-=penalty_points
     accuracy=100*total/max(1,maximum)
     grade=next((g for threshold,g in [(95,'S'),(85,'A'),(70,'B'),(50,'C')] if accuracy>=threshold),'D')
-    return dict(points=total,maximum=maximum,accuracy=math.floor(accuracy*10+.5)/10,grade=grade,counts=counts,judgments=judgments,offsets=offsets,max_combo=best_combo,combo_events=combo_events,extra=extra,full_combo=counts[3]==0 and extra==0 and bool(notes),all_perfect=counts[0]==len(notes) and extra==0 and bool(notes))
+    return dict(points=total,maximum=maximum,accuracy=math.floor(accuracy*10+.5)/10,grade=grade,counts=counts,judgments=judgments,offsets=offsets,max_combo=best_combo,combo_events=combo_events,extra=extra,extra_penalty=extra_penalty,penalty_points=penalty_points,full_combo=counts[3]==0 and extra==0 and bool(notes),all_perfect=counts[0]==len(notes) and extra==0 and bool(notes))
 
 def score(notes,hits):
     report=analyze(notes,hits)

@@ -3,9 +3,11 @@ extends RefCounted
 static var glows: Dictionary = {}
 var g: Control
 var panels: Dictionary = {}
+var rhythm_route:RefCounted
 
 func _init(game: Control) -> void:
 	g=game
+	rhythm_route=preload("res://gameplay/rhythm_route.gd").new(game)
 	if glows.is_empty():
 		for key in ["cyan","violet","coral"]:
 			var color: Color={"cyan":Color("36d9d0"),"violet":Color("965dff"),"coral":Color("ff6f8b")}[key]
@@ -58,6 +60,7 @@ func panel(rect: Rect2, fill: Color, border: Color, radius := 18) -> void:
 func draw() -> void:
 	var moving: bool=not g.preferences.values.reduced_motion
 	var t: float=g.now() if moving else 0.0
+	if not g.ranker_id.is_empty() and g.phase=="play":t=maxf(0,g.play_time()+g.ranker_seek) if moving else 0.0
 	var accent: Color=Color("ff86a5") if g.phase in ["record","review"] else Color("66ffe3")
 	var glow_key: String="coral" if g.phase in ["record","review"] else "cyan"
 	if not g.map_id.is_empty():
@@ -150,3 +153,7 @@ func draw_progress() -> void:
 		ratio=clampf(time/end,0,1)
 	g.draw_line(Vector2(50,529),Vector2(1102,529),Color("332b4c"),4,true)
 	if ratio>0:g.draw_line(Vector2(50,529),Vector2(50+1052*ratio,529),Color("ff86a5") if g.phase in ["record","review"] else Color("66ffe3"),4,true)
+	rhythm_route.draw()
+
+func draw_rhythm_grid(top:=370.0,bottom:=505.0)->bool:
+	return rhythm_route.grid(top,bottom)

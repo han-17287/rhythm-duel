@@ -33,7 +33,9 @@ func _ready()->void:
 func prepare(id:String,speed:float,lead_in:=0.0,folder:="music")->void:
 	stop();track_id=id;rate=speed;pre_roll=lead_in
 	if web_enabled:
-		web_driver.prepare(web_id,"audio/%s/%s.ogg"%[folder,id],rate);return
+		var url:="audio/%s/%s.ogg"%[folder,id]
+		if folder=="ranker":url+="?revision=%d"%preload("res://gameplay/ranker.gd").revision(id)
+		web_driver.prepare(web_id,url,rate);return
 	# The driver latency query is expensive; refresh at track start / resume.
 	output_latency=AudioServer.get_output_latency()
 	if cache_id!=folder+":"+id:

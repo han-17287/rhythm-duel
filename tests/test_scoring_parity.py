@@ -26,7 +26,7 @@ class Parity(unittest.TestCase):
         rng=random.Random(1802045);cases=[]
         for windows in [(.022,.05,.1),(.020,.045,.09),(.018,.04,.08)]:
             def append(notes,hits):
-                cases.append(dict(notes=notes,hits=hits,windows=windows,chronological=True,report=analyze(notes,hits,windows=windows,chronological=True)))
+                cases.append(dict(notes=notes,hits=hits,windows=windows,chronological=True,extra_penalty=600,report=analyze(notes,hits,windows=windows,chronological=True,extra_penalty=600)))
             # The existing one-microsecond tolerance is part of the scoring contract.
             # Check either side of every threshold with both early and late input.
             for threshold in windows:

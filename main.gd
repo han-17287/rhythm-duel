@@ -18,6 +18,10 @@ var ranker_kind:="one"
 var ranker_difficulty:="hard"
 var ranker_one_key:=-1
 var ranker_training:=false
+var ranker_loop:=false
+var ranker_loop_count:=1
+var ranker_loop_best:=0.0
+var ranker_loop_last:Dictionary={}
 var ranker_seek:=0.0
 var ranker_end:=0.0
 var ranker_session:=""
@@ -44,6 +48,9 @@ var active_hold := -1
 var live_judgments: Dictionary = {}
 var live_points:=0.0
 var live_possible:=0.0
+var live_extra:=0
+var judgment_cursor:=0
+var max_note_duration:=0.0
 var combo := 0
 var max_combo := 0
 var hit_offsets: Array = []
@@ -276,6 +283,7 @@ func open_menu(destination: String) -> void:
 		outgoing=outgoing.filter(func(packet):return packet.get("type","") not in ["create","join"])
 	room_public=false;room_auto=false;room_title="";match_start_at=-1
 	ranker_id="";ranker_difficulty="hard";ranker_session="";ranker_waiting.clear()
+	ranker_loop=false;ranker_loop_last.clear()
 	story_music.stop()
 	double_practice=false
 	double_beat.reset()
@@ -357,11 +365,15 @@ func receive(m: Dictionary) -> void:
 		"leave_ok":
 			match_cancel_pending=false
 		"ranker_ready":
+			if int(m.get("revision",1))!=Ranker.revision(str(m.id)):
+				status.text="채보가 업데이트됐어요. 게임을 새로고침해 주세요.";return
 			if ranker_waiting.get("id","")==m.id and ranker_waiting.get("kind","")==m.kind and ranker_waiting.get("difficulty","hard")==m.get("difficulty","hard") and (interface.page=="ranker" or phase=="result"):
 				ranker_session=str(m.session);ranker_waiting.clear();launch_ranker(str(m.id),str(m.kind),false,1.0,0.0,0.0,str(m.get("difficulty","hard")))
 		"ranker_board":
+			if int(m.get("revision",1))!=Ranker.revision(str(m.id)):return
 			ranker_boards[Ranker.board_id(str(m.id),str(m.kind),str(m.get("difficulty","hard")))]=m
 		"ranker_result":
+			if int(m.get("revision",1))!=Ranker.revision(str(m.id)):return
 			var response_key:=Ranker.board_id(str(m.id),str(m.kind),str(m.get("difficulty","hard")))
 			if response_key==ranker_upload_key:ranker_upload_pending=false
 			apply_profile(m.profile)
@@ -553,7 +565,9 @@ func begin_play() -> void:
 	hits.clear()
 	resolved.clear()
 	live_judgments.clear()
-	live_points=0;live_possible=0
+	live_points=0;live_possible=0;live_extra=0
+	judgment_cursor=0;max_note_duration=0
+	for note in notes:max_note_duration=maxf(max_note_duration,float(note.d))
 	hit_offsets.clear()
 	combo = 0
 	max_combo = 0
@@ -607,6 +621,9 @@ func _input(event: InputEvent) -> void:
 		elif event.keycode==KEY_P: preview_pattern()
 		return
 	if event.pressed and event.keycode==KEY_R and practice and phase=="result":replay_last();return
+	if event.pressed and phase=="play" and not ranker_id.is_empty() and ranker_training:
+		if event.keycode==KEY_R:restart_practice_current();return
+		if event.keycode==KEY_L:stop_ranker_loop();return
 	if paused:
 		if event.pressed and event.keycode==KEY_R:restart_practice_current()
 		return
@@ -737,7 +754,8 @@ func register_judgment(index: int, error: float, signed_offset = null) -> void:
 func judge_tap(t: float, lane := 0) -> void:
 	var best := -1
 	var error := hit_window()+.000001
-	for i in range(notes.size()):
+	for i in range(note_index_at(t-hit_window()-.000001),notes.size()):
+		if float(notes[i].t)>t+hit_window()+.000001:break
 		if resolved.has(i) or int(notes[i].get("lane",0))!=lane: continue
 		var difference := absf(t-float(notes[i].t))
 		if difference<=error:
@@ -746,7 +764,10 @@ func judge_tap(t: float, lane := 0) -> void:
 			if not ranker_id.is_empty():break
 	if best<0:
 		combo=0
+		live_extra+=1
+		live_points-=Ranker.EXTRA_PENALTY if not ranker_id.is_empty() else 200
 		show_judgment(INF)
+		if not ranker_id.is_empty():result.text="OFF BEAT · -%d"%Ranker.EXTRA_PENALTY
 		sounds.play("miss",.25)
 		if solo_id=="survival": energy=maxf(0,energy-10)
 	elif float(notes[best].d)<0.3:
@@ -899,7 +920,7 @@ func toggle_pause() -> void:
 func replay_last() -> void:
 	if not practice or phase!="result": return
 	if not ranker_id.is_empty():
-		start_ranker(ranker_id,ranker_kind,ranker_training,speed,ranker_seek,ranker_end,ranker_difficulty);return
+		start_ranker(ranker_id,ranker_kind,ranker_training,speed,ranker_seek,ranker_end,ranker_difficulty,ranker_loop);return
 	if not map_id.is_empty():
 		start_map(map_id,map_training,speed,map_guide)
 		return
@@ -1011,10 +1032,12 @@ func _process(delta: float) -> void:
 					sounds.play("hold",0.12)
 					flash=maxf(flash,0.3)
 			var judgment_time:=input_time()
-			for i in range(notes.size()):
+			for i in range(judgment_cursor,notes.size()):
+				if judgment_time<=float(notes[i].t)+hit_window()+.000001:break
 				if not resolved.has(i) and judgment_time>float(notes[i].t)+float(notes[i].d)+hit_window()+.000001:
 					resolved[i]=true
 					if practice or slot!=attacker: register_judgment(i,INF)
+			while judgment_cursor<notes.size() and resolved.has(judgment_cursor):judgment_cursor+=1
 			if solo_id=="survival" and energy<=0:
 				if is_double(): double_beat.release_all()
 				elif key_held: release_hit(input_time())
@@ -1056,7 +1079,8 @@ func _draw() -> void:
 	var left := 1050.0 if phase in ["record","review"] else 180.0
 	draw_style_box(panel_style(), Rect2(48,355,1056,165))
 	if flash>0: draw_rect(Rect2(50,357,1052,161),Color(feedback_color,flash*.055))
-	for x in range(200,1080,80): draw_line(Vector2(x,370),Vector2(x,505),Color(0.15,0.2,0.3),1)
+	if not stage.draw_rhythm_grid():
+		for x in range(200,1080,80): draw_line(Vector2(x,370),Vector2(x,505),Color(0.15,0.2,0.3),1)
 	draw_line(Vector2(65,y),Vector2(1085,y),Color("71648d"),2)
 	draw_line(Vector2(left,368),Vector2(left,508),Color(CYAN,.14),18+flash*14,true)
 	draw_line(Vector2(left,368),Vector2(left,508),CYAN,3+flash*3,true)
@@ -1074,9 +1098,10 @@ func _draw() -> void:
 			draw_line(start,start+Vector2(cos(angle),sin(angle))*9,Color(CYAN,flash),2,true)
 	if phase in ["play","preview"]:
 		var t := play_time()
-		for i in range(notes.size()):
+		for i in range(note_index_at(t-max_note_duration-1),notes.size()):
 			var n: Dictionary = notes[i]
 			var x := left+(float(n.t)-t)*scroll_pixels()
+			if x>1090:break
 			var tail := x+float(n.d)*scroll_pixels()
 			if tail<60 or x>1090 or resolved.has(i): continue
 			if float(n.d)>0:
@@ -1241,20 +1266,21 @@ func song_bpm() -> float:
 func judge_windows() -> Array:return Ranker.windows(ranker_difficulty) if not ranker_id.is_empty() else Scoring.WINDOWS
 func hit_window() -> float:return float(judge_windows()[2])
 
-func start_ranker(id: String,kind: String,training := false,rate := 1.0,seek := 0.0,end := 0.0,difficulty := "hard") -> void:
+func start_ranker(id: String,kind: String,training := false,rate := 1.0,seek := 0.0,end := 0.0,difficulty := "hard",loop := false) -> void:
 	var song:=Ranker.find(id)
 	if song.is_empty() or not kind in ["one","double"] or not difficulty in Ranker.DIFFICULTIES or Ranker.source_chart(id,kind,difficulty).is_empty():return
 	if not training and not profile.is_empty() and accounts_enabled:
 		if not ranker_waiting.is_empty():return
 		ranker_waiting={"id":id,"kind":kind,"difficulty":difficulty};ranker_request_at=now()
-		queue_request({"type":"ranker_begin","id":id,"kind":kind,"difficulty":difficulty})
+		queue_request({"type":"ranker_begin","id":id,"kind":kind,"difficulty":difficulty,"revision":Ranker.revision(id)})
 		status.text="기록 도전을 준비하고 있어요…";return
-	launch_ranker(id,kind,training,rate,seek,end,difficulty)
+	launch_ranker(id,kind,training,rate,seek,end,difficulty,loop)
 
-func launch_ranker(id: String,kind: String,training := false,rate := 1.0,seek := 0.0,end := 0.0,difficulty := "hard") -> void:
+func launch_ranker(id: String,kind: String,training := false,rate := 1.0,seek := 0.0,end := 0.0,difficulty := "hard",loop := false) -> void:
 	map_id="";map_guide=false;solo_id="";practice=true;slot=0;attacker=0
 	if training or profile.is_empty():ranker_session=""
 	ranker_id=id;ranker_kind=kind;ranker_difficulty=difficulty;ranker_training=training;ranker_seek=seek if training else 0.0;ranker_end=end if training else 0.0
+	ranker_loop=training and loop;ranker_loop_count=1;ranker_loop_best=0;ranker_loop_last.clear()
 	speed=clampf(rate,.5,1) if training else 1.0
 	notes=Ranker.chart(id,kind,ranker_seek,ranker_end,difficulty);new_best=false;reward_text=""
 	begin_play();match_finished=false
@@ -1262,26 +1288,47 @@ func launch_ranker(id: String,kind: String,training := false,rate := 1.0,seek :=
 
 func finish_ranker() -> void:
 	story_music.stop()
-	last_report=Scoring.analyze(notes,hits,Ranker.windows(ranker_difficulty),true)
+	last_report=Scoring.analyze(notes,hits,Ranker.windows(ranker_difficulty),true,Ranker.EXTRA_PENALTY)
 	last_report.grade=Ranker.grade(last_report.accuracy)
+	if ranker_training and ranker_loop:
+		ranker_loop_last=last_report.duplicate(true)
+		ranker_loop_best=maxf(ranker_loop_best,float(last_report.accuracy))
+		ranker_loop_count+=1
+		begin_play()
+		return
 	last_report_mine=true;phase="result";match_finished=true
 	if not ranker_training:new_best=preferences.remember(Ranker.record_id(ranker_id,ranker_kind,ranker_difficulty),last_report)
 	result.text="연습 완료" if ranker_training else "RANKER CLEAR" if last_report.accuracy>=75 else "RETRY THE LIMIT"
 	next_button.hide()
 	if not ranker_training and not ranker_session.is_empty():
 		ranker_upload_key=Ranker.board_id(ranker_id,ranker_kind,ranker_difficulty);ranker_upload_pending=true;ranker_upload_at=now();reward_text="글로벌 기록 등록 중…"
-		queue_request({"type":"ranker_result","session":ranker_session,"hits":hits,"difficulty":ranker_difficulty})
+		queue_request({"type":"ranker_result","session":ranker_session,"hits":hits,"difficulty":ranker_difficulty,"revision":Ranker.revision(ranker_id)})
 		ranker_session=""
 	if last_report.accuracy>=75:sounds.fanfare();effects.confetti()
 
 func scroll_pixels() -> float:
 	return 260*1.55*float(preferences.values.ranker_scroll) if not ranker_id.is_empty() else 260.0
+
+func note_index_at(time:float) -> int:
+	var low:=0
+	var high:=notes.size()
+	while low<high:
+		var mid:=(low+high)/2
+		if float(notes[mid].t)<time:low=mid+1
+		else:high=mid
+	return low
 func restart_practice_current() -> void:
 	if not practice:return
-	if not ranker_id.is_empty():launch_ranker(ranker_id,ranker_kind,true,speed,ranker_seek,ranker_end,ranker_difficulty)
+	if not ranker_id.is_empty():
+		ranker_training=true;ranker_session="";begin_play()
 	elif not map_id.is_empty():start_map(map_id,map_training,speed,map_guide)
 	elif not solo_id.is_empty():start_challenge(solo_id)
 	else:begin_play()
+
+func stop_ranker_loop() -> void:
+	if not ranker_training or not ranker_loop:return
+	ranker_loop=false
+	emote_text="이번 구간이 끝나면 연습 결과를 보여줘요.";emote_until=now()+3
 
 func web_key_delay(event: InputEventKey) -> float:
 	if event.has_meta("pointer"):return float(event.get_meta("pointer_delay",0.0))
