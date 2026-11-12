@@ -5,6 +5,9 @@ func _initialize()->void:call_deferred("run")
 func run()->void:
 	var g=load("res://main.tscn").instantiate();root.add_child(g);await process_frame
 	g.preferences.values.key="SPACE";g.preferences.values.offset_ms=0;g.preferences.records.clear()
+	# This accelerated input fixture verifies timing, not real-time sound output.
+	# The dedicated feedback and browser suites validate audible playback.
+	g.preferences.values.volume=0;g.preferences.values.music_volume=0;g.apply_preferences()
 	var total:=0
 	for song in Ranker.catalog():
 		assert(float(song.duration)+float(song.audio_offset)>=180 and float(song.duration)+float(song.audio_offset)<=240)
@@ -77,6 +80,8 @@ func run()->void:
 	arena.selected="r02";arena.sync();assert(not arena.auditioning)
 	arena.audition();g.launch_ranker("r01","one");arena.sync()
 	assert(not arena.auditioning and g.story_music.started)
+	g.open_menu("ranker");arena.stop_audition()
 	arena=null;ranker_ui=null
-	await create_timer(.4).timeout;g.queue_free();await process_frame
+	# Let the native mixer release the stopped stream before engine shutdown.
+	await create_timer(.15).timeout;g.queue_free();await process_frame;await process_frame
 	print("RANKER_SMOKE_OK: 24 tiered charts, %d notes, exact Ogg durations, real one/double inputs, holds, separate records, section/half-speed practice"%total);quit()

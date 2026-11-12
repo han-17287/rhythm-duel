@@ -4,10 +4,12 @@ static var glows: Dictionary = {}
 var g: Control
 var panels: Dictionary = {}
 var rhythm_route:RefCounted
+var ranker_stage:RefCounted
 
 func _init(game: Control) -> void:
 	g=game
 	rhythm_route=preload("res://gameplay/rhythm_route.gd").new(game)
+	ranker_stage=preload("res://gameplay/ranker_stage.gd").new(game)
 	if glows.is_empty():
 		for key in ["cyan","violet","coral"]:
 			var color: Color={"cyan":Color("36d9d0"),"violet":Color("965dff"),"coral":Color("ff6f8b")}[key]
@@ -58,6 +60,9 @@ func panel(rect: Rect2, fill: Color, border: Color, radius := 18) -> void:
 	g.draw_style_box(style,rect)
 
 func draw() -> void:
+	if not g.ranker_id.is_empty() and g.phase=="play":
+		ranker_stage.draw(glows)
+		return
 	var moving: bool=not g.preferences.values.reduced_motion
 	var t: float=g.now() if moving else 0.0
 	if not g.ranker_id.is_empty() and g.phase=="play":t=maxf(0,g.play_time()+g.ranker_seek) if moving else 0.0
@@ -142,6 +147,10 @@ func draw() -> void:
 		g.draw_line(Vector2(48,93),Vector2(1104,93),Color(g.feedback_color,g.flash*.4),2,true)
 
 func draw_progress() -> void:
+	if not g.ranker_id.is_empty() and g.phase=="play":
+		ranker_stage.draw_phrase_progress()
+		rhythm_route.draw()
+		return
 	if not g.phase in ["record","play","preview","review"]: return
 	var ratio:=0.0
 	if g.phase in ["record","review"]:

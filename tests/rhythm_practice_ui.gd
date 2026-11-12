@@ -7,6 +7,7 @@ func run()->void:
 	var game=load("res://main.tscn").instantiate()
 	root.add_child(game);await process_frame
 	game.socket.close();game.profile={};game.accounts_enabled=false
+	game.preferences.values.volume=0;game.preferences.values.music_volume=0;game.apply_preferences()
 	game.open_menu("ranker");game.interface.sync()
 	var arena=game.interface.gameplay_ui.ranker_ui
 	var song:Dictionary=Ranker.find("r01")
@@ -41,6 +42,8 @@ func run()->void:
 	game.open_menu("ranker");arena.selected="r04";arena.sync()
 	assert(arena.section_select.selected==0 and arena.practice_song=="r04")
 	assert(arena.section_select.item_count==5+Ranker.find("r04").phrases.size())
-	arena=null;game.queue_free();await process_frame
+	arena.stop_audition();game.story_music.stop()
+	await create_timer(.15).timeout
+	arena=null;game.queue_free();await process_frame;await process_frame
 	print("RHYTHM_PRACTICE_UI_OK: phrase bounds/preview/audition, section compatibility, loop practice arguments, formal isolation")
 	quit()

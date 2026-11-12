@@ -47,7 +47,9 @@ func load_data() -> void:
 			if not typeof(record.get("points",null)) in [TYPE_INT,TYPE_FLOAT]: continue
 			if not typeof(record.get("accuracy",null)) in [TYPE_INT,TYPE_FLOAT]: continue
 			if not is_finite(float(record.points)) or not is_finite(float(record.accuracy)): continue
-			records[str(id)]={"points":clampi(int(record.points),0,1000000000),"accuracy":clampf(float(record.accuracy),0,100),"grade":str(record.get("grade","D")),"stars":clampi(int(record.get("stars",0)),0,3),"max_combo":maxi(0,int(record.get("max_combo",0)))}
+			var perfect:bool=typeof(record.get("all_perfect",false))==TYPE_BOOL and bool(record.get("all_perfect",false))
+			var full:bool=perfect or (typeof(record.get("full_combo",false))==TYPE_BOOL and bool(record.get("full_combo",false)))
+			records[str(id)]={"points":clampi(int(record.points),0,1000000000),"accuracy":clampf(float(record.accuracy),0,100),"grade":str(record.get("grade","D")),"stars":clampi(int(record.get("stars",0)),0,3),"max_combo":maxi(0,int(record.get("max_combo",0))),"full_combo":full,"all_perfect":perfect}
 
 func save() -> void:
 	var data := {"values":values,"records":records,"patterns":patterns,"next_pattern_number":next_pattern_number}
@@ -63,6 +65,12 @@ func remember(id: String, report: Dictionary) -> bool:
 	var better := int(report.points)>int(previous.get("points",-1)) or (int(report.points)==int(previous.get("points",-1)) and int(report.max_combo)>int(previous.get("max_combo",-1)))
 	if better:
 		records[id] = {"points":int(report.points),"accuracy":float(report.accuracy),"grade":str(report.grade),"stars":3 if report.accuracy>=95 else 2 if report.accuracy>=80 else 1 if report.accuracy>=60 else 0,"max_combo":int(report.max_combo)}
+	var perfect:bool=bool(previous.get("all_perfect",false)) or bool(report.get("all_perfect",false))
+	var full:bool=perfect or bool(previous.get("full_combo",false)) or bool(report.get("full_combo",false))
+	var badges_changed:bool=perfect!=bool(previous.get("all_perfect",false)) or full!=bool(previous.get("full_combo",false))
+	if records.has(id):
+		records[id].full_combo=full;records[id].all_perfect=perfect
+	if better or badges_changed:
 		save()
 	return better
 

@@ -13,6 +13,14 @@ var story_music: Node
 var double_practice:=false
 var double_beat = preload("res://gameplay/double_beat.gd").new(self)
 const Ranker=preload("res://gameplay/ranker.gd")
+const RankerAnalysis=preload("res://gameplay/ranker_analysis.gd")
+var ranker_run=preload("res://gameplay/ranker_run.gd").new(self)
+var ranker_feedback:Node2D
+var ranker_best_before:Dictionary={}
+var ranker_phrase_report:Array=[]
+var ranker_phrase_live:Array=[]
+var ranker_phrase_notice:=""
+var ranker_phrase_notice_until:=-1.0
 var ranker_id:=""
 var ranker_kind:="one"
 var ranker_difficulty:="hard"
@@ -184,6 +192,8 @@ func _ready() -> void:
 	add_child(story_music)
 	effects = preload("res://gameplay/particles.gd").new()
 	add_child(effects)
+	ranker_feedback=preload("res://gameplay/ranker_feedback.gd").new()
+	ranker_feedback.setup(self);add_child(ranker_feedback)
 	apply_preferences()
 	interface = preload("res://interface.gd").new(self)
 	interface.build()
@@ -284,6 +294,7 @@ func open_menu(destination: String) -> void:
 	room_public=false;room_auto=false;room_title="";match_start_at=-1
 	ranker_id="";ranker_difficulty="hard";ranker_session="";ranker_waiting.clear()
 	ranker_loop=false;ranker_loop_last.clear()
+	ranker_phrase_report.clear();ranker_run.reset();ranker_feedback.reset()
 	story_music.stop()
 	double_practice=false
 	double_beat.reset()
@@ -379,7 +390,6 @@ func receive(m: Dictionary) -> void:
 			apply_profile(m.profile)
 			if response_key==Ranker.board_id(ranker_id,ranker_kind,ranker_difficulty):
 				reward_text="글로벌 기록 등록 완료"+(" · 첫 클리어 +%d 코인"%int(m.coins) if int(m.coins)>0 else "")
-				emote_text=reward_text;emote_until=now()+5
 			ranker_boards.erase(response_key)
 		"draft_ready":
 			stage_deadline=now()+float(m.get("remaining",90))
@@ -568,6 +578,8 @@ func begin_play() -> void:
 	live_points=0;live_possible=0;live_extra=0
 	judgment_cursor=0;max_note_duration=0
 	for note in notes:max_note_duration=maxf(max_note_duration,float(note.d))
+	ranker_phrase_report.clear();ranker_run.reset()
+	if ranker_feedback:ranker_feedback.reset()
 	hit_offsets.clear()
 	combo = 0
 	max_combo = 0
@@ -596,6 +608,8 @@ func pointer_input(pressed: bool) -> void:
 
 func _input(event: InputEvent) -> void:
 	if not event is InputEventKey or event.echo: return
+	if phase=="result" and not ranker_id.is_empty() and interface.gameplay_ui.ranker_debrief.handle_input(event):
+		get_viewport().set_input_as_handled();return
 	if phase=="lobby" and interface.get("auth_view") and interface.auth_view.handle_input(event):
 		get_viewport().set_input_as_handled();return
 	if phase in ["record","play"] and event.physical_keycode in [KEY_SPACE,KEY_D,KEY_F,KEY_J,KEY_K]:event.keycode=event.physical_keycode
@@ -655,7 +669,8 @@ func _input(event: InputEvent) -> void:
 			down = t
 			flash = 1.0
 			feedback_color=CYAN
-			sounds.note(resolved.size(),.23 if is_song() else 1.0)
+			if not ranker_id.is_empty():sounds.ranker_press(0)
+			else:sounds.note(resolved.size(),.23 if is_song() else 1.0)
 			judge_tap(t)
 		elif not event.pressed and key_held:
 			release_hit(t)
@@ -725,7 +740,8 @@ func show_judgment(error: float) -> void:
 	result.text = last_judgment
 	if judgment_tween and judgment_tween.is_valid(): judgment_tween.kill()
 	result.pivot_offset = Vector2(0,22)
-	if not preferences.values.reduced_motion:
+	result.scale = Vector2.ONE
+	if ranker_id.is_empty() and not preferences.values.reduced_motion:
 		result.scale = Vector2(1.055,1.055)
 		judgment_tween = create_tween().set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 		judgment_tween.tween_property(result,"scale",Vector2.ONE,0.18)
@@ -743,7 +759,12 @@ func register_judgment(index: int, error: float, signed_offset = null) -> void:
 	if solo_id=="survival": energy=clampf(energy+(-24 if j==3 else 3 if j==0 else -4 if j==2 else 0),0,100)
 	show_judgment(error)
 	last_hit_offset=null if signed_offset==null else float(signed_offset)*1000
-	if j==3: sounds.play("miss",0.55)
+	if not ranker_id.is_empty():
+		var lane:=int(notes[index].get("lane",0))
+		ranker_run.judgment(index,j)
+		sounds.ranker_judge(j,lane,float(notes[index].d)>=.3)
+		ranker_feedback.hit(lane,j,float(notes[index].d)>=.3)
+	elif j==3: sounds.play("miss",0.55)
 	else:
 		effects.burst(Vector2(180,406+int(notes[index].get("lane",0))*76 if is_double() else 460),skin_color,j==0)
 		if combo>0 and combo%(25 if not ranker_id.is_empty() else 4)==0:
@@ -767,8 +788,10 @@ func judge_tap(t: float, lane := 0) -> void:
 		live_extra+=1
 		live_points-=Ranker.EXTRA_PENALTY if not ranker_id.is_empty() else 200
 		show_judgment(INF)
-		if not ranker_id.is_empty():result.text="OFF BEAT · -%d"%Ranker.EXTRA_PENALTY
-		sounds.play("miss",.25)
+		if not ranker_id.is_empty():
+			result.text="OFF BEAT · -%d"%Ranker.EXTRA_PENALTY
+			ranker_run.stray(t);ranker_feedback.stray(lane);sounds.ranker_judge(3,lane)
+		else:sounds.play("miss",.25)
 		if solo_id=="survival": energy=maxf(0,energy-10)
 	elif float(notes[best].d)<0.3:
 		resolved[best]=true
@@ -1000,7 +1023,7 @@ func _process(delta: float) -> void:
 				var current: Dictionary=notes[preview_index-1]
 				if float(current.d)>=0.3 and preview_t<float(current.t)+float(current.d) and now()-last_hold_sound>0.18:
 					last_hold_sound=now()
-					sounds.play("hold",0.12)
+					if ranker_id.is_empty():sounds.play("hold",0.12)
 			if preview_t>pattern_end()+0.5:
 				phase="review"
 				result.text="이 비트로 공격할까?"
@@ -1029,7 +1052,7 @@ func _process(delta: float) -> void:
 				result.text="HOLD  %.1fs"%remaining
 				if now()-last_hold_sound>0.18:
 					last_hold_sound=now()
-					sounds.play("hold",0.12)
+					if ranker_id.is_empty():sounds.play("hold",0.12)
 					flash=maxf(flash,0.3)
 			var judgment_time:=input_time()
 			for i in range(judgment_cursor,notes.size()):
@@ -1038,6 +1061,7 @@ func _process(delta: float) -> void:
 					resolved[i]=true
 					if practice or slot!=attacker: register_judgment(i,INF)
 			while judgment_cursor<notes.size() and resolved.has(judgment_cursor):judgment_cursor+=1
+			if not ranker_id.is_empty():ranker_run.advance(judgment_time,t)
 			if solo_id=="survival" and energy<=0:
 				if is_double(): double_beat.release_all()
 				elif key_held: release_hit(input_time())
@@ -1281,6 +1305,7 @@ func launch_ranker(id: String,kind: String,training := false,rate := 1.0,seek :=
 	if training or profile.is_empty():ranker_session=""
 	ranker_id=id;ranker_kind=kind;ranker_difficulty=difficulty;ranker_training=training;ranker_seek=seek if training else 0.0;ranker_end=end if training else 0.0
 	ranker_loop=training and loop;ranker_loop_count=1;ranker_loop_best=0;ranker_loop_last.clear()
+	ranker_best_before=preferences.records.get(Ranker.record_id(id,kind,difficulty),{}).duplicate(true)
 	speed=clampf(rate,.5,1) if training else 1.0
 	notes=Ranker.chart(id,kind,ranker_seek,ranker_end,difficulty);new_best=false;reward_text=""
 	begin_play();match_finished=false
@@ -1296,7 +1321,9 @@ func finish_ranker() -> void:
 		ranker_loop_count+=1
 		begin_play()
 		return
+	ranker_phrase_report=RankerAnalysis.summarize(Ranker.find(ranker_id),notes,hits,last_report,ranker_seek,ranker_end,Ranker.windows(ranker_difficulty))
 	last_report_mine=true;phase="result";match_finished=true
+	emote_until=0
 	if not ranker_training:new_best=preferences.remember(Ranker.record_id(ranker_id,ranker_kind,ranker_difficulty),last_report)
 	result.text="연습 완료" if ranker_training else "RANKER CLEAR" if last_report.accuracy>=75 else "RETRY THE LIMIT"
 	next_button.hide()
@@ -1329,6 +1356,21 @@ func stop_ranker_loop() -> void:
 	if not ranker_training or not ranker_loop:return
 	ranker_loop=false
 	emote_text="이번 구간이 끝나면 연습 결과를 보여줘요.";emote_until=now()+3
+
+func practice_ranker_phrase(index:int)->void:
+	if ranker_id.is_empty() or phase!="result":return
+	var phrases:Array=Ranker.find(ranker_id).get("phrases",[])
+	if index<0 or index>=phrases.size():return
+	var phrase:Dictionary=phrases[index]
+	var arena=interface.gameplay_ui.ranker_ui
+	arena.selected=ranker_id;arena.kind=ranker_kind;arena.difficulty=ranker_difficulty
+	arena.rebuild_practice_options();arena.section_select.select(5+index)
+	arena.speed.select(1);arena.loop_toggle.button_pressed=true
+	start_ranker(ranker_id,ranker_kind,true,.75,float(phrase.t),float(phrase.end),ranker_difficulty,true)
+
+func practice_weakest_phrase()->void:
+	var row:=RankerAnalysis.weakest(ranker_phrase_report)
+	if not row.is_empty():practice_ranker_phrase(int(row.index))
 
 func web_key_delay(event: InputEventKey) -> float:
 	if event.has_meta("pointer"):return float(event.get_meta("pointer_delay",0.0))

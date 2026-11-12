@@ -6,6 +6,7 @@ var ui: RefCounted:
 	get: return ui_ref.get_ref()
 var calibration_ui: RefCounted
 var ranker_ui: RefCounted
+var ranker_debrief: RefCounted
 var story_hud: RefCounted
 var music_slider: HSlider
 var music_restore:Button
@@ -81,6 +82,8 @@ func build() -> void:
 	map_ui.build()
 	ranker_ui=preload("res://gameplay/ranker_interface.gd").new(g,ui)
 	ranker_ui.build()
+	ranker_debrief=preload("res://gameplay/ranker_debrief.gd").new(g,ui)
+	ranker_debrief.build()
 	loop_stop=ui.button(g,"반복 끄기 · L",Rect2(870,124,234,40),g.stop_ranker_loop)
 	loop_stop.add_theme_font_size_override("font_size",14)
 	calibration_ui=preload("res://gameplay/calibration.gd").new(g,ui)
@@ -400,7 +403,7 @@ func sync() -> void:
 	ui.key_hint.position.x=870;ui.key_hint.size.x=232;ui.key_hint.horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER
 	ui.key_hint.position.y=566
 	if g.phase=="play" and not mine: ui.key_hint.hide()
-	var report_ready: bool=g.phase=="result" and not g.last_report.is_empty()
+	var report_ready: bool=g.phase=="result" and not g.last_report.is_empty() and g.ranker_id.is_empty()
 	ui.reveal(summary,report_ready)
 	footer.visible=report_ready
 	replay.visible=report_ready and g.practice
@@ -487,6 +490,11 @@ func sync() -> void:
 		combo_label.hide()
 		precision.hide()
 	if story_hud:story_hud.sync()
+	if not g.ranker_id.is_empty() and g.phase in ["play","result"]:
+		for legacy in [g.status,g.result,g.hint,g.tally,ui.role,ui.tips,combo_label,precision,live_note,energy,ranker_ui.song_status,ranker_ui.transition,story_hud.intro_panel,story_hud.signal_meter]:legacy.hide()
+		if g.phase=="result":
+			for legacy in [summary,footer,replay,advance,course_back,rematch,ui.reward_shop,g.next_button]:legacy.hide()
+	if ranker_debrief:ranker_debrief.sync()
 	music_value.text="곡 배경음악  %d%%"%int(float(g.preferences.values.music_volume)*100)
 
 func apply_stage_theme(active: bool) -> void:

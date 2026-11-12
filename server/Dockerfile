@@ -5,7 +5,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxrandr2 libxi6 libgl1 libasound2 libpulse0 libudev1 \
     && rm -rf /var/lib/apt/lists/*
 # Bump this revision for client-only releases under Render rootDir=server.
-ARG CLIENT_REVISION=rhythm-phrases-v2
+ARG CLIENT_REVISION=performance-stage-v3
 ADD https://codeload.github.com/han-17287/rhythm-duel/zip/refs/heads/main?revision=${CLIENT_REVISION} /tmp/game.zip
 RUN python -m zipfile -e /tmp/game.zip /src
 WORKDIR /src/rhythm-duel-main

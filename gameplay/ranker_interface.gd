@@ -246,6 +246,8 @@ func sync()->void:
 	audition_button.tooltip_text="선택 구간부터 최대 18초를 들어봐요. 전체 곡을 선택하면 첫 드롭부터 시작해요."
 	var record:Dictionary=g.preferences.records.get(Ranker.record_id(selected,kind,difficulty),{})
 	best.text="첫 기록에 도전해봐" if record.is_empty() else "%s  %.1f%%  /  MAX %d COMBO"%[str(record.grade),float(record.accuracy),int(record.max_combo)]
+	if bool(record.get("all_perfect",false)):best.text+=" · AP 달성"
+	elif bool(record.get("full_combo",false)):best.text+=" · FC 달성"
 	var windows:=Ranker.windows(difficulty)
 	timing_info.text="%s · %.0f / %.0f / %.0fms · 75%% 클리어\n빈 박 추가 입력 -%d점 · 연습은 기록·보상 제외"%[difficulty.to_upper(),windows[0]*1000,windows[1]*1000,windows[2]*1000,Ranker.EXTRA_PENALTY]
 	for i in range(3):
@@ -259,6 +261,8 @@ func sync()->void:
 	for i in range(4):
 		var item:Dictionary=Ranker.catalog()[i];levels[i].text="LV.%d"%Ranker.level(item.id,kind,difficulty);var r:Dictionary=g.preferences.records.get(Ranker.record_id(item.id,kind,difficulty),{})
 		card_records[i].text="%s · %d BPM · NO RECORD"%[str(item.subtitle),int(item.bpms.max())] if r.is_empty() else "%s · %.1f%% · %d COMBO"%[str(r.grade),float(r.accuracy),int(r.max_combo)]
+		if bool(r.get("all_perfect",false)):card_records[i].text+=" · AP"
+		elif bool(r.get("full_combo",false)):card_records[i].text+=" · FC"
 		cards[i].add_theme_stylebox_override("normal",ui.style(Color("213247") if item.id==selected else Design.PANEL,Color(str(item.color)) if item.id==selected else Design.LINE,2 if item.id==selected else 1))
 	var data:Dictionary=g.ranker_boards.get(Ranker.board_id(selected,kind,difficulty),{})
 	if data.is_empty():board_text.text=("연결을 확인해 주세요." if g.now()-board_at>12 else "연결 중…")+"\n\n내 로컬 기록\n"+best.text

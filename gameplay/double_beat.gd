@@ -43,7 +43,9 @@ func press(lane: int, pressed: bool,delay := 0.0) -> void:
 			g.active_hold=-1
 			g.judge_tap(t,lane)
 			holds[lane]=g.active_hold;g.active_hold=-1
-			g.flash=1;g.feedback_color=COLORS[lane];g.sounds.note(lane*3,.23 if g.is_song() else 1.0)
+			g.flash=1;g.feedback_color=COLORS[lane]
+			if not g.ranker_id.is_empty():g.sounds.ranker_press(lane)
+			else:g.sounds.note(lane*3,.23 if g.is_song() else 1.0)
 		elif not pressed and held[lane]:release(lane,t)
 func finish(lane: int,at := -1.0) -> void:
 	var duration:float=maxf(0,(g.now() if at<0 else at)-g.origin-starts[lane])
