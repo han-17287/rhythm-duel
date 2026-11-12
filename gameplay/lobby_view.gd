@@ -43,7 +43,7 @@ func build() -> void:
 	ui.text(page,"YOUR RHYTHM. YOUR RULES.",50,183,16,Design.MINT).add_theme_font_override("font",Design.font("display"))
 	ui.text(page,"네 비트가,\n게임의 룰이 된다.",46,216,52)
 	ui.text(page,"여덟 개의 비트를 던지고, 완벽하게 받아쳐.\n친구와 겨루거나 음악을 따라 스토리 여정을 시작해봐.",50,374,18,Design.MUTED)
-	tile("친구와 대전","ONLINE DUEL / 방 코드로 함께",Rect2(50,453,264,88),"battle",func():ui.page="rooms",true)
+	tile("온라인 대전","자동 매칭 · 공개방 · 친구 초대",Rect2(50,453,264,88),"battle",func():ui.page="rooms",true)
 	g.practice_button=tile("스토리 모드","12 SONGS / 스토리 여정",Rect2(330,453,248,88),"map",func():open_recommended())
 	ui.profile_summary=ui.text(page,"",50,553,14,Design.MUTED)
 	var a:=tile("이어서 도전","",Rect2(50,594,336,82),"crown",func():open_recommended())

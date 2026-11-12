@@ -3,6 +3,8 @@ extends RefCounted
 const Design=preload("res://gameplay/ui_theme.gd")
 var lobby_view: RefCounted
 var room_view: RefCounted
+var social_view: RefCounted
+var auth_view: RefCounted
 var account_name: Label
 var account_wallet: Label
 
@@ -189,6 +191,7 @@ func decorate_slider(slider: HSlider) -> void:
 func nav_button(value: String, rect: Rect2, destination: String) -> Button:
 	var b:=button(g,value,rect,func():
 		if g.phase!="lobby":return
+		if destination!="rooms" and g.match_active:g.cancel_match()
 		page=destination
 		if destination=="auth":g.open_transport())
 	b.add_to_group("perfecto_menu_nav")
@@ -223,7 +226,9 @@ func build() -> void:
 	account_name=text(account_button,"로그인 / 가입",48,3,13)
 	account_wallet=text(account_button,"게스트로 플레이 중",48,24,10,MUTED)
 	icon_button("gear","설정",Rect2(1016,24,40,44),func():
-		if g.phase=="lobby":page="settings")
+		if g.phase=="lobby":
+			if g.match_active:g.cancel_match()
+			page="settings")
 	icon_button("expand","전체 화면",Rect2(1064,24,40,44),g.toggle_fullscreen)
 	g.status = text(g,"",50,124,17,MUTED)
 	g.status.clip_text=true
@@ -248,70 +253,15 @@ func build() -> void:
 	lobby_view.build()
 	home=lobby_view.page
 
-	rooms = group()
-	text(rooms,"ONLINE / DUEL ARENA",50,123,12,MINT).add_theme_font_override("font",Design.font("display"))
-	text(rooms,"오늘은 어떤 한 판?",48,157,35)
-	var a := card(rooms,Rect2(50,231,506,347))
-	text(a,"방 만들기",88,14,25)
-	text(a,"HOST / CUSTOM RULES",88,49,11,MINT)
-	var a_icon=preload("res://gameplay/ui_icon.gd").new();a_icon.kind="battle";a_icon.position=Vector2(24,13);a_icon.size=Vector2(48,48);a.add_child(a_icon)
-	mode_select = selector(a,Rect2(24,74,458,47),["일반전 · 자유로운 친구 대전","스피드전 · 더 빠른 라운드","랭크전 β · 레이팅 도전","더블 비트 · 두 줄 F / J"])
-	text(a,"라운드 수",24,139,14,MUTED)
-	text(a,"시작 배속",260,139,14,MUTED)
-	rounds_select = selector(a,Rect2(24,164,218,47),["1 라운드","2 라운드","3 라운드","4 라운드","5 라운드","6 라운드","7 라운드","8 라운드","9 라운드"])
-	speed_select = selector(a,Rect2(260,164,222,47),["0.50x","0.75x","1.00x","1.25x","1.50x","1.75x","2.00x"])
-	mode_select.item_selected.connect(func(_i): options_changed())
-	rounds_select.item_selected.connect(func(_i): options_changed())
-	speed_select.item_selected.connect(func(_i): options_changed())
-	text(a,"랭크전은 3라운드 · 1.0x 고정 / 양쪽 로그인 필요",24,227,14,MUTED)
-	button(a,"이 설정으로 방 만들기  →",Rect2(24,270,458,55),func(): g.connect_room("create"),true)
-	var b := card(rooms,Rect2(578,231,526,347),Color("9e7bdb"))
-	text(b,"친구 방 참가",88,14,25)
-	text(b,"JOIN / PRIVATE MATCH",88,49,11,PURPLE)
-	var b_icon=preload("res://gameplay/ui_icon.gd").new();b_icon.kind="map";b_icon.position=Vector2(24,13);b_icon.size=Vector2(48,48);b.add_child(b_icon)
-	text(b,"친구가 알려준 코드를 입력하세요.",24,78,17,MUTED)
-	g.code = edit(b,"6자리 방 코드",Rect2(24,125,478,60))
-	g.code.max_length = 6
-	g.code.placeholder_text="ROOM CODE"
-	g.code.alignment=HORIZONTAL_ALIGNMENT_CENTER
-	g.code.add_theme_font_override("font",Design.font("display"))
-	g.code.add_theme_font_size_override("font_size",26)
-	button(b,"코드로 참가  →",Rect2(24,206,478,55),func(): g.connect_room("join"))
-	text(b,"일반전·스피드전은 게스트로도 즐길 수 있어요.",24,288,15,MUTED)
-	button(rooms,"서버 설정",Rect2(50,599,150,43),func(): g.endpoint.visible = not g.endpoint.visible)
-	g.endpoint = edit(rooms,"wss://서버주소",Rect2(216,599,690,46))
-	g.endpoint.text = str(ProjectSettings.get_setting("application/config/server_url","wss://rhythm-duel.onrender.com"))
-	if OS.has_feature("web"):
-		g.endpoint.text = str(JavaScriptBridge.eval("window.location.origin")).replace("https://","wss://").replace("http://","ws://")
-	g.endpoint.add_theme_font_size_override("font_size",17)
-	g.endpoint.hide()
-	g.lobby = HBoxContainer.new()
-	g.add_child(g.lobby)
-	g.lobby.hide()
+	social_view=preload("res://gameplay/social_lobby.gd").new(g,self)
+	social_view.build()
 
 	room_view=preload("res://gameplay/room_view.gd").new(g,self)
 	room_view.build()
 	waiting=room_view.page
 
-	auth = group()
-	text(auth,"다시 만나서 반가워요.",50,175,35)
-	var login_card := card(auth,Rect2(50,239,646,350))
-	text(login_card,"닉네임",24,20,15,MUTED)
-	name_edit = edit(login_card,"한글·영문·숫자 2~16자",Rect2(24,49,598,55))
-	name_edit.max_length = 16
-	text(login_card,"비밀번호",24,122,15,MUTED)
-	password_edit = edit(login_card,"8자 이상",Rect2(24,151,598,55))
-	password_edit.secret = true
-	password_edit.max_length = 128
-	auth_login=button(login_card,"로그인",Rect2(24,238,284,60),func(): submit_auth("login"),true)
-	auth_register=button(login_card,"새 계정 만들기",Rect2(326,238,296,60),func(): submit_auth("register"))
-	var p := card(auth,Rect2(720,239,384,350),Color("9e7bdb"))
-	text(p,"YOUR PLAYER CARD",24,24,15,PURPLE)
-	auth_notice = text(p,"게스트로도 친구 대전이 가능해요.",24,83,17,MUTED)
-	auth_session=button(p,"",Rect2(24,262,336,55),func():
-		if g.profile.is_empty():page="home"
-		else:g.account_action("logout"))
-	text(auth,"비밀번호 대신 로그인 토큰만 이 기기에 저장합니다. 공용 PC에서는 로그아웃하세요.",50,612,14,MUTED)
+	auth_view=preload("res://gameplay/auth_view.gd").new(g,self)
+	auth_view.build()
 
 	shop = group()
 	text(shop,"작은 변화, 새로운 리듬.",50,175,35)
@@ -423,20 +373,15 @@ func sync(delta := 0.0) -> void:
 	else: role.text = "상대의 리듬을 기다리는 중…"
 	g.result.position.y = 250 if in_game else 270
 	g.hint.position.y = 580 if in_game else 360
-	auth_login.disabled=not g.accounts_enabled or not g.connected
-	auth_register.disabled=auth_login.disabled
-	auth_session.text="게스트로 계속" if g.profile.is_empty() else "로그아웃"
 	if g.profile.is_empty():
 		account_name.text = "로그인 / 가입"
 		account_wallet.text="게스트로 플레이 중"
 		profile_summary.text = "게스트로 바로 시작 · 로그인하면 보상과 전적 저장"
-		auth_notice.text = "가입하면 레이팅과 스킨을\n계정에 모아둘 수 있어요." if g.accounts_enabled else "온라인 계정은 준비 중이에요.\n지금은 게스트로 플레이해요."
 		shop_balance.text = "로그인하고 대전 보상으로 스킨을 모아보세요."
 	else:
 		account_name.text = str(g.profile.name).left(10)+( "…" if str(g.profile.name).length()>10 else "")
 		account_wallet.text="%d COINS  ·  %d RP"%[int(g.profile.coins),int(g.profile.rating)]
 		profile_summary.text = "%s   ·   %d RP   ·   %d승 %d패 %d무" % [g.profile.name,int(g.profile.rating),int(g.profile.wins),int(g.profile.losses),int(g.profile.draws)]
-		auth_notice.text = "%s\n\n%d RP  ·  %d 코인\n\n%d승  %d패  %d무" % [g.profile.name,int(g.profile.rating),int(g.profile.coins),int(g.profile.wins),int(g.profile.losses),int(g.profile.draws)]
 		shop_balance.text = "내 지갑   %d 코인   ·   구매한 스킨은 바로 장착돼요." % int(g.profile.coins)
 	for i in range(shop_buttons.size()):
 		var item: Dictionary = g.catalog[i]
@@ -449,3 +394,5 @@ func sync(delta := 0.0) -> void:
 	if gameplay_ui: gameplay_ui.sync()
 	if lobby_view:lobby_view.sync()
 	if room_view:room_view.sync()
+	if social_view:social_view.sync()
+	if auth_view:auth_view.sync()

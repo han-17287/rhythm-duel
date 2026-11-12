@@ -45,6 +45,13 @@ class Store:
         ]
         with self.transaction() as db:
             for sql in statements: db.execute(sql)
+            if self.url:
+                # These are application-server tables, not browser/Supabase Auth
+                # tables. Default-deny RLS keeps auto-generated public APIs from
+                # exposing password/session hashes or balances. Connect as the
+                # project/table owner; owners retain normal backend access.
+                for table in ('accounts','inventory','sessions','settlements','ranker_bests'):
+                    db.execute(f'ALTER TABLE {table} ENABLE ROW LEVEL SECURITY')
     @staticmethod
     def password_hash(password,salt): return hashlib.pbkdf2_hmac('sha256',password.encode(),bytes.fromhex(salt),600000).hex()
     @staticmethod

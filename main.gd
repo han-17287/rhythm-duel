@@ -79,6 +79,25 @@ var web_input: JavaScriptObject
 var copy_success: JavaScriptObject
 var copy_failure: JavaScriptObject
 var pending := ""
+var auth_pending:=false
+var auth_started_at:=0.0
+var room_public:=false
+var room_auto:=false
+var room_title:=""
+var room_request_canceled:=false
+var match_active:=false
+var match_cancel_pending:=false
+var match_mode:="casual"
+var match_started_at:=0.0
+var match_cancel_at:=0.0
+var match_waiting:=0
+var match_position:=0
+var match_start_at:=-1.0
+var public_rooms:Array=[]
+var public_room_filter:="all"
+var public_room_loading:=false
+var public_room_requested_at:=-10.0
+var public_room_error:=""
 var slot := 0
 var attacker := 0
 var phase := "lobby"
@@ -184,13 +203,38 @@ func queue_request(packet: Dictionary) -> void:
 		outgoing.append(packet)
 		open_transport()
 
-func connect_room(action: String) -> void:
+func connect_room(action: String, public_room := false, title_value := "") -> void:
 	if phase != "lobby": return
-	pending = action
-	practice = false
-	phase = "connecting"
-	status.text = "친구와 연결하고 있어요…"
-	queue_request({"type":action,"code":code.text.to_upper(),"settings":room_settings})
+	cancel_match()
+	room_request_canceled=false
+	pending=action;practice=false;phase="connecting"
+	status.text="대전방에 연결하고 있어요…"
+	var packet:Dictionary={"type":action,"code":code.text.to_upper(),"settings":room_settings}
+	if action=="create":packet.merge({"public":public_room,"title":title_value})
+	queue_request(packet)
+
+func create_social_room(public_room:bool,title_value:String)->void:
+	connect_room("create",public_room,title_value)
+func join_public_room(code_value:String)->void:
+	code.text=code_value;connect_room("join")
+func browse_public_rooms(mode := "all")->void:
+	public_room_filter=mode;public_room_loading=true;public_room_requested_at=now();public_room_error=""
+	queue_request({"type":"browse_rooms","mode":mode})
+func start_matchmaking(mode:String)->void:
+	if phase!="lobby" or match_active or match_cancel_pending:return
+	if mode not in ["casual","rush","double","ranked"]:return
+	if mode=="ranked" and profile.is_empty():interface.page="auth";status.text="랭크전은 로그인이 필요해요.";return
+	match_active=true;match_mode=mode;match_started_at=now();match_waiting=0;match_position=0
+	practice=false;room_request_canceled=false;status.text="실제 상대를 찾고 있어요…"
+	queue_request({"type":"match_join","mode":mode})
+func cancel_match()->void:
+	if not match_active:return
+	match_active=false;match_waiting=0;match_position=0;match_start_at=-1
+	status.text=""
+	outgoing=outgoing.filter(func(packet):return packet.get("type","")!="match_join")
+	if connected:
+		match_cancel_pending=true;match_cancel_at=now();send_packet({"type":"match_cancel"})
+	else:match_cancel_pending=false
 
 func send_packet(packet: Dictionary) -> void:
 	if socket.get_ready_state() == WebSocketPeer.STATE_OPEN:
@@ -220,10 +264,17 @@ func apply_profile(data: Dictionary) -> void:
 		if item.id == profile.get("skin","mint"): skin_color = Color(str(item.color))
 
 func account_action(action: String, name_value := "", password_value := "") -> void:
+	cancel_match()
+	auth_pending=true;auth_started_at=now()
 	status.text = "계정 서버에서 확인하고 있어요…"
 	queue_request({"type":action,"name":name_value,"password":password_value})
 
 func open_menu(destination: String) -> void:
+	cancel_match()
+	if phase=="connecting":
+		room_request_canceled=true
+		outgoing=outgoing.filter(func(packet):return packet.get("type","") not in ["create","join"])
+	room_public=false;room_auto=false;room_title="";match_start_at=-1
 	ranker_id="";ranker_difficulty="hard";ranker_session="";ranker_waiting.clear()
 	story_music.stop()
 	double_practice=false
@@ -288,6 +339,23 @@ func begin_record() -> void:
 
 func receive(m: Dictionary) -> void:
 	match m.get("type", ""):
+		"room_list":
+			if str(m.get("mode",public_room_filter))!=public_room_filter:return
+			public_rooms=m.get("rooms",[]);public_room_loading=false;public_room_error=""
+		"match_status":
+			if bool(m.get("queued",false)):
+				if not match_active:return
+				if str(m.get("mode",match_mode))!=match_mode:return
+				match_waiting=int(m.get("waiting",1));match_position=int(m.get("position",1))
+				match_started_at=now()-float(m.get("elapsed",now()-match_started_at))
+			else:
+				match_active=false;match_cancel_pending=false;match_waiting=0;match_position=0
+		"match_found":
+			if not match_active:return
+			room_auto=true;match_start_at=now()+maxf(0,float(m.get("starts_in",3)))
+			status.text="상대를 찾았어요! %s"%str(m.get("opponent","상대"))
+		"leave_ok":
+			match_cancel_pending=false
 		"ranker_ready":
 			if ranker_waiting.get("id","")==m.id and ranker_waiting.get("kind","")==m.kind and ranker_waiting.get("difficulty","hard")==m.get("difficulty","hard") and (interface.page=="ranker" or phase=="result"):
 				ranker_session=str(m.session);ranker_waiting.clear();launch_ranker(str(m.id),str(m.kind),false,1.0,0.0,0.0,str(m.get("difficulty","hard")))
@@ -320,6 +388,7 @@ func receive(m: Dictionary) -> void:
 			accounts_enabled = bool(m.get("accounts_enabled",false))
 			catalog = m.get("catalog",catalog)
 		"profile":
+			auth_pending=false
 			apply_profile(m.get("profile",{}))
 			if m.has("token"): save_session(str(m.token))
 			status.text = str(m.get("message","로그인되었습니다." if not profile.is_empty() else "로그아웃했습니다."))
@@ -329,11 +398,24 @@ func receive(m: Dictionary) -> void:
 			reward_text = "보상 +%d 코인   ·   레이팅 %+d" % [int(m.coins),int(m.rating)]
 			hint.text = reward_text
 		"room":
+			if not bool(m.get("auto",false)) and match_active:return
+			if bool(m.get("auto",false)) and match_active and str(m.settings.mode)!=match_mode:return
+			if bool(m.get("auto",false)) and not match_active and phase=="lobby":return
+			if room_request_canceled and phase=="lobby":return
+			room_public=bool(m.get("public",room_public));room_auto=bool(m.get("auto",room_auto));room_title=str(m.get("title",room_title))
 			room_settings = m.settings
 			room_players = m.players
 			interface.update_options()
 			phase = "room"
 		"joined":
+			if bool(m.get("auto",false)) and not match_active:
+				send_packet({"type":"match_cancel"});return
+			if not bool(m.get("auto",false)) and match_active:return
+			if bool(m.get("auto",false)) and str(m.get("settings",{}).get("mode",match_mode))!=match_mode:return
+			if room_request_canceled:
+				send_packet({"type":"leave"});return
+			room_public=bool(m.get("public",false));room_auto=bool(m.get("auto",false));room_title=str(m.get("title",""))
+			match_cancel_pending=false
 			slot = int(m.slot)
 			interface.room_code = str(m.code)
 			phase = "room"
@@ -345,6 +427,7 @@ func receive(m: Dictionary) -> void:
 			reward_text = ""
 			status.text = "방 코드: %s  /  나: P%d  /  상대 기다리는 중" % [m.code, slot+1]
 		"turn":
+			match_active=false;match_cancel_pending=false;match_start_at=-1
 			room_settings = m.get("settings",room_settings)
 			last_report.clear()
 			rematch_votes.clear()
@@ -384,19 +467,26 @@ func receive(m: Dictionary) -> void:
 				hint.text = "방장이 다음 공수를 시작합니다"
 		"error":
 			status.text = str(m.message)
+			var action:String=str(m.get("action",""))
+			if action in ["register","login","resume","logout"]:auth_pending=false
+			if action=="browse_rooms":public_room_loading=false;public_room_error=status.text
+			if action in ["match_join","match_cancel"]:match_active=false;match_cancel_pending=false;match_waiting=0;match_position=0
 			if m.get("action","")=="ranker_begin":ranker_waiting.clear()
 			if m.get("action","")=="ranker_result":
 				ranker_upload_pending=false;reward_text="글로벌 등록 실패 · 로컬 기록은 저장됐어요."
 			if m.get("action","")=="resume":
 				save_session("")
 				apply_profile({})
-			if phase == "connecting":
-				socket.close()
-				connected = false
-				phase = "lobby"
-				lobby.show()
+			if phase=="connecting" and action in ["create","join"]:
+				phase="lobby";pending=""
+				interface.page="rooms"
 		"left":
+			if m.has("code") and str(m.code)!=interface.room_code:return
+			match_active=false;match_cancel_pending=false;match_start_at=-1
 			opponent_left=true
+			if phase=="room" and room_auto:
+				phase="lobby";interface.page="rooms";room_auto=false;room_public=false
+				room_players.clear();interface.room_code="";status.text="상대의 연결이 끊겼어요. 다시 검색해 주세요.";return
 			if phase=="result" and match_finished:
 				emote_text="상대가 나갔어요. 결과는 그대로 확인할 수 있어요."
 				emote_until=now()+4
@@ -492,6 +582,8 @@ func pointer_input(pressed: bool) -> void:
 
 func _input(event: InputEvent) -> void:
 	if not event is InputEventKey or event.echo: return
+	if phase=="lobby" and interface.get("auth_view") and interface.auth_view.handle_input(event):
+		get_viewport().set_input_as_handled();return
 	if phase in ["record","play"] and event.physical_keycode in [KEY_SPACE,KEY_D,KEY_F,KEY_J,KEY_K]:event.keycode=event.physical_keycode
 	var event_delay:=web_key_delay(event)
 	var event_now:=now()-event_delay
@@ -823,6 +915,13 @@ func _process(delta: float) -> void:
 		var pending_ranker:=ranker_waiting.duplicate();ranker_waiting.clear()
 		emote_text="연결이 지연되어 로컬 기록으로 시작해요.";emote_until=now()+5
 		if interface.page=="ranker" or phase=="result":launch_ranker(pending_ranker.id,pending_ranker.kind,false,1.0,0.0,0.0,str(pending_ranker.get("difficulty","hard")))
+	if auth_pending and now()-auth_started_at>12:
+		auth_pending=false
+		outgoing=outgoing.filter(func(packet):return packet.get("type","") not in ["register","login","resume","logout"])
+		if interface.page=="auth":status.text="계정 서버 응답이 늦어요. 잠시 후 다시 시도해 주세요."
+	if match_cancel_pending and now()-match_cancel_at>12:
+		match_cancel_pending=false
+	if match_active and phase=="lobby" and interface.page!="rooms":cancel_match()
 	socket.poll()
 	var state := socket.get_ready_state()
 	if state == WebSocketPeer.STATE_OPEN:
@@ -830,7 +929,8 @@ func _process(delta: float) -> void:
 			connected = true
 			connection_started = -1
 			send_packet({"type":"hello"})
-			if not session_token.is_empty(): send_packet({"type":"resume","token":session_token})
+			if not session_token.is_empty():
+				auth_pending=true;auth_started_at=now();send_packet({"type":"resume","token":session_token})
 			for packet in outgoing: send_packet(packet)
 			outgoing.clear()
 		while socket.get_available_packet_count()>0:
@@ -838,12 +938,14 @@ func _process(delta: float) -> void:
 			if packet is Dictionary: receive(packet)
 	elif connection_started>=0 and (state==WebSocketPeer.STATE_CLOSED or now()-connection_started>90):
 		socket.close()
+		auth_pending=false;match_active=false;match_cancel_pending=false;public_room_loading=false
 		connection_started = -1
 		outgoing.clear()
 		if not practice or phase=="lobby": status.text = "연결이 지연되고 있어요. 잠시 후 다시 시도하세요."
 		if phase=="connecting": phase = "lobby"
 	elif connected and state == WebSocketPeer.STATE_CLOSED:
 		connected = false
+		auth_pending=false;match_active=false;match_cancel_pending=false;public_room_loading=false
 		if not practice and phase not in ["lobby","result"]:
 			phase = "disconnected"
 			result.text = "연결이 종료되었습니다"

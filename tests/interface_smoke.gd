@@ -30,6 +30,7 @@ func run() -> void:
 	assert(not game.interface.gameplay_ui.emotes.visible)
 	game.socket.close()
 	game.connected=true
+	game.connection_started=-1 # An established connection has finished its opening attempt.
 	game.phase="review"
 	game.key_held=true
 	game.down=0
